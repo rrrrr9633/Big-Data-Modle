@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     mqtt_broker_port: int = 1883
     mqtt_telemetry_topic: str = "factory/+/workshop/+/line/+/machine/+/telemetry"
     mqtt_client_id: str = "pdm-mqtt-to-kafka"
+    redis_online_ttl_seconds: int = 120
+    redis_latest_snapshot_ttl_seconds: int = 300
     mqtt_to_kafka_enabled: bool = False
     raw_telemetry_consumer_enabled: bool = False
     cleaned_telemetry_consumer_enabled: bool = False

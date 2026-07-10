@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.core.config import settings
 from app.ingestion.schemas import TelemetryEvent
 from app.quality.idempotency import create_redis_client
 
@@ -31,7 +32,8 @@ def update_device_snapshot(event: TelemetryEvent) -> None:
                 "gateway_id": event.gateway_id or "",
             },
         )
-        client.set(online_key, "1", ex=120)
+        client.expire(latest_key, settings.redis_latest_snapshot_ttl_seconds)
+        client.set(online_key, "1", ex=settings.redis_online_ttl_seconds)
     finally:
         client.close()
 
