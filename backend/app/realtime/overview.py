@@ -37,14 +37,10 @@ def fetch_realtime_overview(db: Session) -> dict[str, object]:
 def fetch_realtime_device(db: Session, device_code: str) -> dict[str, object]:
     snapshot = read_device_snapshot(device_code)
     predictions = [
-        item
-        for item in fetch_predictions(db, limit=100)
-        if item.get("device_code") == device_code
+        item for item in fetch_predictions(db, limit=100) if item.get("device_code") == device_code
     ]
     warnings = [
-        item
-        for item in fetch_warnings(db, limit=100)
-        if item.get("device_code") == device_code
+        item for item in fetch_warnings(db, limit=100) if item.get("device_code") == device_code
     ]
     return {
         "device_code": device_code,

@@ -77,7 +77,6 @@ def explain_rule_match(
         )
     if rule.health_score_lt is not None and health_score < rule.health_score_lt:
         reasons.append(
-            f"健康评分 {health_score:.1f}，"
-            f"低于{rule.label}阈值 {rule.health_score_lt:g}"
+            f"健康评分 {health_score:.1f}，低于{rule.label}阈值 {rule.health_score_lt:g}"
         )
     return reasons

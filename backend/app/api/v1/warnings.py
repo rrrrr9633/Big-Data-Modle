@@ -5,14 +5,17 @@ from app.repositories.maintenance_repository import (
     ensure_prediction_model_schema,
     fetch_warning_by_id,
     fetch_warnings,
+    insert_audit_log,
     transition_warning_status,
 )
+from app.security.auth import CurrentUser, require_admin
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
+AdminUser = Annotated[CurrentUser, Depends(require_admin)]
 WarningLimit = Annotated[int, Query(ge=1, le=500)]
 WarningStatus = Literal["new", "acknowledged", "processing", "resolved", "ignored"]
 
@@ -42,6 +45,7 @@ def update_warning_status(
     warning_id: int,
     payload: WarningStatusUpdate,
     db: DbSession,
+    user: AdminUser,
 ) -> dict[str, Any]:
     ensure_prediction_model_schema(db)
     warning = fetch_warning_by_id(db, warning_id)
@@ -66,6 +70,19 @@ def update_warning_status(
         to_status=to_status,
         operator=payload.operator.strip(),
         note=payload.note.strip() if payload.note else None,
+    )
+    insert_audit_log(
+        db,
+        actor=user.username,
+        role=user.role,
+        action="transition_warning",
+        resource=f"warning:{warning_id}",
+        detail={
+            "from_status": from_status,
+            "to_status": to_status,
+            "operator": payload.operator.strip(),
+            "note": payload.note.strip() if payload.note else None,
+        },
     )
     db.commit()
     return fetch_warning_by_id(db, warning_id) or warning

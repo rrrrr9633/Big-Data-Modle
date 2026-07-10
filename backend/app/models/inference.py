@@ -36,9 +36,6 @@ def _estimate_failure_probability(features: dict[str, float]) -> float:
     trend_pressure = abs(features.get("trend", 0.0)) / 3
     quality_penalty = 1 - features.get("quality_mean", 1.0)
     probability = (
-        mean_pressure * 0.35
-        + peak_pressure * 0.25
-        + trend_pressure * 0.25
-        + quality_penalty * 0.15
+        mean_pressure * 0.35 + peak_pressure * 0.25 + trend_pressure * 0.25 + quality_penalty * 0.15
     )
     return min(max(probability, 0.0), 1.0)

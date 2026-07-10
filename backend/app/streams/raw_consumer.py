@@ -5,10 +5,12 @@ import logging
 import threading
 
 from app.core.config import settings
+from app.core.database import SessionLocal
 from app.ingestion.kafka_producer import KafkaJsonProducer
 from app.ingestion.schemas import parse_telemetry_event
 from app.quality.idempotency import claim_event
 from app.quality.normalizer import normalize_telemetry_event
+from app.quality.point_catalog import validate_event_against_point_catalog
 from app.quality.validator import validate_telemetry_event
 from app.streams.kafka_client import parse_kafka_api_version
 
@@ -56,6 +58,14 @@ def start_raw_telemetry_consumer() -> object | None:
                             publish_invalid(
                                 message.value,
                                 validation.reason or "invalid telemetry event",
+                            )
+                            continue
+                        with SessionLocal() as db:
+                            point_validation = validate_event_against_point_catalog(event, db)
+                        if not point_validation.valid:
+                            publish_invalid(
+                                message.value,
+                                point_validation.reason or "point catalog validation failed",
                             )
                             continue
                         if not claim_event(event.event_id):

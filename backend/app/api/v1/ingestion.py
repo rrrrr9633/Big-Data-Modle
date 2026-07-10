@@ -17,6 +17,7 @@ from app.repositories.maintenance_repository import (
     create_import_batch,
     ensure_baseline_model,
     ensure_prediction_model_schema,
+    insert_audit_log,
     insert_feature_window,
     insert_prediction,
     insert_prediction_explanations,
@@ -25,6 +26,8 @@ from app.repositories.maintenance_repository import (
     upsert_device,
     upsert_model_metric,
 )
+from app.security.auth import CurrentUser
+from app.security.policies import require_permission
 from app.services.maintenance import generate_maintenance_advice
 from app.tsdb.telemetry_repository import (
     insert_device_status_event,
@@ -38,6 +41,7 @@ from sqlalchemy.orm import Session
 router = APIRouter()
 logger = logging.getLogger(__name__)
 DbSession = Annotated[Session, Depends(get_db)]
+ModelTrainUser = Annotated[CurrentUser, Depends(require_permission("model.train"))]
 CsvFile = Annotated[UploadFile, File(...)]
 ReplayDemoData = Annotated[bool, Form()]
 
@@ -46,6 +50,7 @@ ReplayDemoData = Annotated[bool, Form()]
 async def import_ai4i_csv(
     file: CsvFile,
     db: DbSession,
+    user: ModelTrainUser,
     replay_demo_data: ReplayDemoData = False,
 ) -> dict[str, bool | int | str]:
     content = (await file.read()).decode("utf-8-sig")
@@ -72,6 +77,20 @@ async def import_ai4i_csv(
     if replay_demo_data:
         prediction_count, warning_count = _replay_ai4i_rows(db, rows, batch_id, model_suite)
 
+    insert_audit_log(
+        db,
+        actor=user.username,
+        role=user.role,
+        action="train_ai4i_model",
+        resource=f"model:active:{model_suite_version(model_suite)}",
+        detail={
+            "filename": file.filename,
+            "row_count": len(rows),
+            "replay_demo_data": replay_demo_data,
+            "prediction_count": prediction_count,
+            "warning_count": warning_count,
+        },
+    )
     db.commit()
     return {
         "status": "completed",

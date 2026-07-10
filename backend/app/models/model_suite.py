@@ -311,8 +311,7 @@ def _window_vector(window: TimeSeriesWindow) -> list[float]:
     features = window.feature_values
     if all(sensor_key in features for _feature_name, sensor_key in AI4I_SENSOR_FEATURE_MAP):
         return [
-            float(features[sensor_key])
-            for _feature_name, sensor_key in AI4I_SENSOR_FEATURE_MAP
+            float(features[sensor_key]) for _feature_name, sensor_key in AI4I_SENSOR_FEATURE_MAP
         ]
 
     raw_mean = features.get("raw_mean", 0.0)

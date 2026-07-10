@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
@@ -29,7 +29,7 @@ const pipeline = [
 const capabilities = [
   {
     title: '工业数据接入',
-    text: '支持机床点位以 MQTT 主题进入 EMQX，后端消费者写入 Kafka raw topic；未接物理设备时，模拟设备源也走同一协议链路。',
+    text: '生产主入口是 MQTT。现场 Modbus、OPC UA、S7 等协议由工业网关适配，统一转换为 TelemetryEvent 后发布到 EMQX。',
     icon: Waveform,
     image: 'industrial-sensors-floor',
     className: 'card-xl',
@@ -67,9 +67,9 @@ const capabilities = [
 const systemLayers = [
   {
     title: '采集接入层',
-    detail: '机床、网关或模拟设备源发布标准点位事件；生产环境主路径为 MQTT 到 EMQX。',
-    signal: 'vibration_rms / spindle_temperature / motor_current',
-    output: '标准点位事件',
+    detail: '工业网关或边缘采集服务把 PLC / CNC / 传感器点位标准化为单点位事件。',
+    signal: 'Modbus / OPC UA / S7 → TelemetryEvent',
+    output: 'MQTT 标准遥测事件',
   },
   {
     title: '流式总线层',
@@ -137,7 +137,7 @@ const backendCapabilities = [
 const operationLoop = [
   {
     title: '设备接入',
-    detail: 'MQTT、HTTP 与 WebSocket 入口统一转换为标准点位事件。',
+    detail: '真实设备主入口是 MQTT；HTTP 与 WebSocket 只作为调试和联调旁路。',
   },
   {
     title: '数据治理',
@@ -166,8 +166,74 @@ const responsibilityStats = [
   ['闭环', '预测、预警、状态流转'],
 ];
 
+const gatewayFlow = [
+  {
+    title: '现场协议采集',
+    detail: 'CNC、PLC 与传感器不要求直接调用后端 API，由工业网关读取 Modbus、OPC UA、S7、EtherNet/IP 等点位。',
+    tag: 'EDGE',
+  },
+  {
+    title: '点位语义标准化',
+    detail: '网关统一设备编号、点位编码、单位、质量分数、采集时间和 event_id，避免后端绑定具体厂商协议。',
+    tag: 'NORMALIZE',
+  },
+  {
+    title: 'MQTT 发布到 EMQX',
+    detail: 'topic 使用 factory/{factory}/workshop/{workshop}/line/{line}/machine/{device_code}/telemetry。',
+    tag: 'MQTT',
+  },
+  {
+    title: '后端流式闭环',
+    detail: 'mqtt_to_kafka 订阅工厂遥测主题，写入 Kafka raw，再进入清洗、TSDB、Redis、特征窗口、推理和预警。',
+    tag: 'BACKEND',
+  },
+];
+
+const telemetryFields = [
+  ['event_id', '网关生成的事件唯一 ID，用于幂等'],
+  ['device_code', '设备编号，必须和设备台账一致'],
+  ['point_code', '点位编码，例如 spindle_temperature'],
+  ['value / unit', '数值与单位，例如 72.6 C'],
+  ['quality', '0 到 1 的质量分数，坏点不能伪装成 1'],
+  ['ts / gateway_id', '采集时间与来源网关'],
+];
+
+const productionReadiness = [
+  {
+    state: '已具备',
+    title: '后端实时计算链路',
+    detail: 'MQTT → Kafka raw → 清洗 → TSDB/Redis → 特征窗口 → 推理 → 预测/预警已按后台消费者拆分。',
+  },
+  {
+    state: '已具备',
+    title: '标准遥测事件模型',
+    detail: 'TelemetryEvent 明确 event_id、device_code、point_code、value、unit、quality、ts、gateway_id。',
+  },
+  {
+    state: '需现场补齐',
+    title: '边缘采集适配器',
+    detail: '需要工业网关或边缘程序完成 PLC/CNC 协议读取、点位映射、质量判断和 MQTT JSON 发布。',
+  },
+  {
+    state: '需治理',
+    title: '设备与点位主数据',
+    detail: '需要确定设备编号规则、点位编码规则、单位、采样频率、质量规则和模型特征映射。',
+  },
+  {
+    state: '需运维',
+    title: '生产运行保障',
+    detail: '需要 EMQX、Kafka、Redis、TSDB、MySQL 的监控、备份、权限、告警和消费者进程守护。',
+  },
+  {
+    state: '需验证',
+    title: '模型现场校准',
+    detail: 'AI4I 训练链路可用，但真实工厂需要现场历史数据、阈值标定、漂移监测和误报复核。',
+  },
+];
+
 const SYSTEM_ENTERED_STORAGE_KEY = 'industrial-pdm-system-entered';
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://127.0.0.1:8000';
+const AUTH_TOKEN_STORAGE_KEY = 'industrial-pdm-auth-token';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? '';
 
 function apiUrl(path: string) {
   return path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
@@ -249,7 +315,7 @@ export function App() {
               />
             </h1>
             <p className="hero-lead">
-              系统围绕机床传感器、EMQX、Kafka、时序库、Redis、模型推理和预警闭环构建，服务对象是设备运维、产线管理和工厂数据平台，而不是接口演示页面。
+              系统围绕工业网关、EMQX、Kafka、时序库、Redis、模型推理和预警闭环构建。它不直接绑定具体厂商设备协议，而是在网关侧完成协议采集与标准遥测转换。
             </p>
             <div className="hero-actions">
               <button className="primary-action" onClick={enterSystem}>
@@ -314,7 +380,7 @@ export function App() {
             <p className="kicker">Operational Architecture</p>
             <h2>从一条点位读数，到一次可处理的设备风险。</h2>
             <p>
-              系统不是把接口结果摆到页面上，而是把设备点位变成可追溯的生产判断：读数进入流式总线，治理后沉淀到时序与业务库，再由模型形成风险、健康评分和处置入口。
+              本系统不直接绑定具体厂商设备协议，而是在工业网关侧完成 Modbus、OPC UA、S7 等协议采集，并统一转换为 TelemetryEvent 标准遥测事件，通过 MQTT 发布到 EMQX。后端 mqtt_to_kafka 消费器订阅工厂遥测主题，将设备点位写入 Kafka raw topic，后续由清洗、时序入库、Redis 实时快照、特征窗口和异步推理模块完成实时预测与预警闭环。
             </p>
           </div>
           <div className="architecture-flow" aria-label="点位读数到风险处置链路">
@@ -337,6 +403,49 @@ export function App() {
               <span>RISK TICKET</span>
               <strong>高风险设备进入预警中心</strong>
               <small>故障概率、健康评分、RUL、解释字段、建议动作同步记录。</small>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="ingress" className="chapter section-spacious">
+        <div className="chapter-heading wide-heading">
+          <p className="kicker">Production Ingress</p>
+          <h2>真实设备不直接接后端 API，接入边界放在工业网关。</h2>
+          <p>后端接收的是统一后的 TelemetryEvent，不负责直接适配所有 PLC、CNC、传感器和厂家私有协议。</p>
+        </div>
+        <div className="gateway-grid media-reveal">
+          <div className="gateway-flow-card">
+            {gatewayFlow.map((item) => (
+              <article className="gateway-step" key={item.title}>
+                <span>{item.tag}</span>
+                <h3>{item.title}</h3>
+                <p>{item.detail}</p>
+              </article>
+            ))}
+          </div>
+          <div className="telemetry-contract">
+            <div className="contract-head">
+              <span>TelemetryEvent JSON</span>
+              <strong>单点位标准事件</strong>
+            </div>
+            <pre>{`{
+  "event_id": "gateway-line-1-CNC-001-spindle_temperature-20260710153000123",
+  "device_code": "CNC-001",
+  "point_code": "spindle_temperature",
+  "value": 72.6,
+  "unit": "C",
+  "quality": 0.98,
+  "ts": "2026-07-10T15:30:00.123Z",
+  "gateway_id": "gateway-line-1"
+}`}</pre>
+            <div className="field-grid">
+              {telemetryFields.map(([field, detail]) => (
+                <div key={field}>
+                  <strong>{field}</strong>
+                  <span>{detail}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -429,6 +538,27 @@ export function App() {
         </div>
       </section>
 
+      <section id="readiness" className="chapter section-spacious">
+        <div className="readiness-board media-reveal">
+          <div className="readiness-copy">
+            <p className="kicker">Production Gap</p>
+            <h2>距离真实工厂落地，差距不在“能不能发消息”，而在现场接入治理。</h2>
+            <p>
+              当前后端已经具备流式接入、清洗、存储、推理和预警主链路；真正投产前，需要把设备主数据、点位映射、边缘采集、运行保障和模型校准补齐。
+            </p>
+          </div>
+          <div className="readiness-list">
+            {productionReadiness.map((item) => (
+              <article className="readiness-item" key={item.title}>
+                <span>{item.state}</span>
+                <h3>{item.title}</h3>
+                <p>{item.detail}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <section className="marquee-section">
         <div className="marquee-row">
           {[...pipeline, ...pipeline].map((item, index) => (
@@ -466,6 +596,7 @@ function Navigation({ onEnter }: { onEnter: () => void }) {
       <div className="nav-links">
         <a href="#architecture">架构</a>
         <a href="#capability">能力</a>
+        <a href="#ingress">接入</a>
         <button onClick={onEnter}>进入系统</button>
       </div>
     </nav>
@@ -533,7 +664,30 @@ type DeviceRecord = {
   status?: string;
   health_score?: number;
   risk_level?: RiskLevel;
-  sensor_points?: Array<{ sensor_code?: string; sensor_name?: string; unit?: string; enabled?: boolean }>;
+  sensor_points?: Array<{ sensor_code?: string; sensor_name?: string; unit?: string; sampling_frequency?: string; protocol?: string; source_address?: string; feature_name?: string; quality_rule?: string; enabled?: boolean; min_value?: number | null; max_value?: number | null }>;
+};
+
+type DeviceCatalogPayload = {
+  device_code: string;
+  device_name: string;
+  device_type: string;
+  factory: string;
+  workshop: string;
+  production_line: string;
+  status: string;
+};
+
+type SensorPointPayload = {
+  sensor_name: string;
+  unit: string;
+  sampling_frequency: string;
+  protocol: string;
+  source_address: string;
+  feature_name: string;
+  quality_rule: string;
+  min_value: number | null;
+  max_value: number | null;
+  enabled: boolean;
 };
 
 type ActiveModelState = {
@@ -554,6 +708,68 @@ type ModelMetric = {
   created_at?: string;
 };
 
+type RuntimeDiagnostics = {
+  status?: 'ready' | 'degraded' | string;
+  ingress?: {
+    primary?: string;
+    mqtt_topic?: string;
+    raw_topic?: string;
+    broker?: string;
+  };
+  dependencies?: Array<{ name?: string; status?: string; detail?: string }>;
+  stream_consumers?: Array<{ name?: string; enabled?: boolean; source?: string; target?: string; group_id?: string; responsibility?: string }>;
+  active_model?: { available?: boolean; saved_at?: string; model_names?: string[] };
+  operations_readiness?: Array<{ area?: string; status?: string; items?: string[] }>;
+  production_gaps?: string[];
+};
+
+type QualitySummary = {
+  window_minutes?: number;
+  invalid_topic?: string;
+  invalid_trace_status?: string;
+  invalid_trace_error?: string | null;
+  quality_points?: Array<{
+    device_code?: string;
+    point_code?: string;
+    reading_count?: number;
+    average_quality?: number | null;
+    min_quality?: number | null;
+    last_seen?: string | null;
+  }>;
+  invalid_events?: Array<{ reason?: string; raw?: unknown; [key: string]: unknown }>;
+};
+
+type IngressCatalog = {
+  primary_ingress?: string;
+  mqtt_topic?: string;
+  mqtt_example_topic?: string;
+  edge_adapter_contract?: Record<string, string>;
+  edge_gateway_mappings?: Array<{
+    device_code?: string;
+    mqtt_topic?: string;
+    factory?: string;
+    workshop?: string;
+    production_line?: string;
+    points?: Array<{
+      point_code?: string;
+      point_name?: string;
+      unit?: string;
+      sampling_frequency?: string;
+      protocol?: string;
+      enabled?: boolean;
+      range?: { min?: number | null; max?: number | null };
+      source_address?: string;
+      feature_name?: string;
+      quality_rule?: string;
+      target_payload?: Record<string, unknown>;
+    }>;
+  }>;
+  payload_schema?: string[];
+  gateway_responsibility?: string[];
+  devices?: DeviceRecord[];
+  production_gaps?: string[];
+};
+
 type SystemData = {
   health?: { status?: string; service?: string };
   realtime?: RealtimeOverview;
@@ -562,6 +778,25 @@ type SystemData = {
   devices?: DeviceRecord[];
   activeModel?: ActiveModelState;
   models?: ModelMetric[];
+  runtimeDiagnostics?: RuntimeDiagnostics;
+  ingressCatalog?: IngressCatalog;
+  qualitySummary?: QualitySummary;
+};
+
+type AuthUser = {
+  username?: string;
+  role?: string;
+  auth_disabled?: boolean;
+};
+
+type AuditLogRecord = {
+  id?: number;
+  actor?: string;
+  role?: string;
+  action?: string;
+  resource?: string;
+  detail_json?: unknown;
+  created_at?: string;
 };
 
 type ViewKey = 'ops' | 'realtime' | 'warnings' | 'predictions' | 'devices' | 'models';
@@ -619,9 +854,15 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
   const [operator, setOperator] = useState('系统操作员');
   const [note, setNote] = useState('');
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [authToken, setAuthToken] = useState(() => window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) ?? '');
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
+  const [loginForm, setLoginForm] = useState({ username: 'admin', password: '' });
+
+  const authHeader: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {};
 
   async function request<T>(path: string): Promise<T> {
-    const response = await fetch(apiUrl(path));
+    const response = await fetch(apiUrl(path), { headers: authHeader });
     if (!response.ok) {
       const message = await response.text();
       throw new Error(message || `${response.status} ${response.statusText}`);
@@ -632,7 +873,7 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
   const loadData = async (mode: 'initial' | 'refresh' = 'refresh') => {
     setApiState((current) => ({ ...current, loading: mode === 'initial', refreshing: mode === 'refresh', error: null }));
     try {
-      const [health, realtime, warnings, predictions, devices, activeModel, models] = await Promise.allSettled([
+      const [health, realtime, warnings, predictions, devices, activeModel, models, ingressCatalog, qualitySummary] = await Promise.allSettled([
         request<{ status?: string; service?: string }>('/api/v1/health'),
         request<RealtimeOverview>('/api/v1/realtime/overview'),
         request<WarningRecord[]>('/api/v1/warnings?limit=100'),
@@ -640,6 +881,8 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
         request<DeviceRecord[]>('/api/v1/devices'),
         request<ActiveModelState>('/api/v1/models/active'),
         request<ModelMetric[]>('/api/v1/models'),
+        request<IngressCatalog>('/api/v1/ingress/catalog'),
+        request<QualitySummary>('/api/v1/quality/summary'),
       ]);
 
       setData((current) => ({
@@ -650,6 +893,8 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
         devices: settledValue(devices) ?? current.devices,
         activeModel: settledValue(activeModel) ?? current.activeModel,
         models: settledValue(models) ?? current.models,
+        ingressCatalog: settledValue(ingressCatalog) ?? current.ingressCatalog,
+        qualitySummary: settledValue(qualitySummary) ?? current.qualitySummary,
       }));
 
       const endpointResults = [
@@ -660,6 +905,8 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
         { label: '设备台账', path: '/api/v1/devices', result: devices },
         { label: 'active 模型状态', path: '/api/v1/models/active', result: activeModel },
         { label: '模型指标', path: '/api/v1/models', result: models },
+        { label: '接入目录', path: '/api/v1/ingress/catalog', result: ingressCatalog },
+        { label: '点位质量与异常追踪', path: '/api/v1/quality/summary', result: qualitySummary },
       ];
       const failedEndpoints = endpointResults
         .filter((item) => item.result.status === 'rejected')
@@ -684,11 +931,95 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
     }
   };
 
+  const loadDiagnostics = async () => {
+    try {
+      const diagnostics = await request<RuntimeDiagnostics>('/api/v1/runtime/diagnostics');
+      setData((current) => ({ ...current, runtimeDiagnostics: diagnostics }));
+    } catch (error) {
+      setData((current) => ({
+        ...current,
+        runtimeDiagnostics: {
+          status: 'error',
+          production_gaps: [error instanceof Error ? error.message : '生产运行诊断接口不可用'],
+        },
+      }));
+    }
+  };
+
+  const login = async () => {
+    setActionMessage('正在登录生产工作台...');
+    try {
+      const response = await fetch(apiUrl('/api/v1/auth/login'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(loginForm),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const result = await response.json() as { access_token?: string; role?: string };
+      const token = result.access_token ?? '';
+      window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+      setAuthToken(token);
+      setAuthUser({ username: loginForm.username, role: result.role ?? 'admin' });
+      setActionMessage(`已登录：${loginForm.username}`);
+      setLoginForm((current) => ({ ...current, password: '' }));
+      await loadData('refresh');
+    } catch (error) {
+      setActionMessage(error instanceof Error ? `登录失败：${error.message}` : '登录失败');
+    }
+  };
+
+  const logout = () => {
+    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    setAuthToken('');
+    setAuthUser(null);
+    setActionMessage('已退出登录');
+  };
+
+  const loadCurrentUser = async () => {
+    try {
+      const user = await request<AuthUser>('/api/v1/auth/me');
+      setAuthUser(user);
+    } catch {
+      if (authToken) {
+        window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+        setAuthToken('');
+      }
+      setAuthUser(null);
+    }
+  };
+
+  const loadAuditLogs = async () => {
+    if (!authToken) {
+      setAuditLogs([]);
+      return;
+    }
+    try {
+      const logs = await request<AuditLogRecord[]>('/api/v1/auth/audit?limit=50');
+      setAuditLogs(logs);
+    } catch {
+      setAuditLogs([]);
+    }
+  };
+
   useEffect(() => {
     void loadData('initial');
+    void loadDiagnostics();
+    void loadCurrentUser();
+    void loadAuditLogs();
     const realtimeTimer = window.setInterval(() => void loadData('refresh'), 3000);
-    return () => window.clearInterval(realtimeTimer);
+    const diagnosticsTimer = window.setInterval(() => void loadDiagnostics(), 15000);
+    return () => {
+      window.clearInterval(realtimeTimer);
+      window.clearInterval(diagnosticsTimer);
+    };
   }, []);
+
+  useEffect(() => {
+    void loadCurrentUser();
+    void loadAuditLogs();
+  }, [authToken]);
 
   const devices = data.realtime?.devices ?? [];
   const warnings = data.warnings ?? [];
@@ -716,7 +1047,7 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
     try {
       const response = await fetch(apiUrl(`/api/v1/warnings/${warning.id}/status`), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader },
         body: JSON.stringify({ status, operator, note }),
       });
       if (!response.ok) {
@@ -740,6 +1071,7 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
       formData.append('replay_demo_data', String(replayDemoData));
       const response = await fetch(apiUrl('/api/v1/ingestion/ai4i'), {
         method: 'POST',
+        headers: authHeader,
         body: formData,
       });
       if (!response.ok) {
@@ -768,6 +1100,7 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
     try {
       const response = await fetch(apiUrl('/api/v1/models/active'), {
         method: 'DELETE',
+        headers: authHeader,
       });
       if (!response.ok) {
         throw new Error(await response.text());
@@ -787,6 +1120,65 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
     }
   };
 
+  const saveDevice = async (payload: DeviceCatalogPayload) => {
+    setApiState((current) => ({ ...current, mutating: true, error: null }));
+    setActionMessage(`正在保存设备台账：${payload.device_code}`);
+    try {
+      const response = await fetch(apiUrl('/api/v1/devices'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeader },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      setActionMessage(`设备台账已保存：${payload.device_code}`);
+      await loadData('refresh');
+    } catch (error) {
+      setApiState((current) => ({ ...current, mutating: false, error: error instanceof Error ? error.message : '设备台账保存失败' }));
+      setActionMessage(error instanceof Error ? `设备台账保存失败：${error.message}` : '设备台账保存失败');
+    }
+  };
+
+  const saveSensorPoint = async (deviceCode: string, sensorCode: string, payload: SensorPointPayload) => {
+    setApiState((current) => ({ ...current, mutating: true, error: null }));
+    setActionMessage(`正在保存点位：${deviceCode}/${sensorCode}`);
+    try {
+      const response = await fetch(apiUrl(`/api/v1/devices/${encodeURIComponent(deviceCode)}/points/${encodeURIComponent(sensorCode)}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeader },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      setActionMessage(`点位已保存：${deviceCode}/${sensorCode}`);
+      await loadData('refresh');
+    } catch (error) {
+      setApiState((current) => ({ ...current, mutating: false, error: error instanceof Error ? error.message : '点位保存失败' }));
+      setActionMessage(error instanceof Error ? `点位保存失败：${error.message}` : '点位保存失败');
+    }
+  };
+
+  const disableSensorPoint = async (deviceCode: string, sensorCode: string) => {
+    setApiState((current) => ({ ...current, mutating: true, error: null }));
+    setActionMessage(`正在停用点位：${deviceCode}/${sensorCode}`);
+    try {
+      const response = await fetch(apiUrl(`/api/v1/devices/${encodeURIComponent(deviceCode)}/points/${encodeURIComponent(sensorCode)}`), {
+        method: 'DELETE',
+        headers: authHeader,
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      setActionMessage(`点位已停用：${deviceCode}/${sensorCode}`);
+      await loadData('refresh');
+    } catch (error) {
+      setApiState((current) => ({ ...current, mutating: false, error: error instanceof Error ? error.message : '点位停用失败' }));
+      setActionMessage(error instanceof Error ? `点位停用失败：${error.message}` : '点位停用失败');
+    }
+  };
+
   return (
     <main className="console-shell">
       <header className="console-topbar">
@@ -802,6 +1194,20 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
           <StatusPill label="模型" value={data.activeModel?.available ? 'active' : '未训练'} tone={data.activeModel?.available ? 'ok' : 'warn'} />
           <StatusPill label="实时性" value={freshnessLabel(worstFreshness)} tone={freshnessTone(worstFreshness)} />
           <StatusPill label="刷新" value={apiState.updatedAt ? formatClock(apiState.updatedAt) : '--:--:--'} tone="neutral" />
+        </div>
+        <div className="auth-console">
+          {authUser ? (
+            <>
+              <span>{authUser.auth_disabled ? '开发模式' : `${authUser.username ?? '-'} · ${authUser.role ?? '-'}`}</span>
+              {!authUser.auth_disabled && <button onClick={logout}>退出</button>}
+            </>
+          ) : (
+            <>
+              <input value={loginForm.username} onChange={(event) => setLoginForm((current) => ({ ...current, username: event.target.value }))} placeholder="账号" />
+              <input value={loginForm.password} onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))} placeholder="密码" type="password" />
+              <button disabled={!loginForm.username || !loginForm.password} onClick={() => void login()}>登录</button>
+            </>
+          )}
         </div>
         <button className="console-exit" onClick={onBack}>返回入口</button>
       </header>
@@ -832,15 +1238,26 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
 
           {criticalWarnings.length > 0 && <CriticalAlertBanner warnings={criticalWarnings} onOpen={() => setActiveView('warnings')} />}
 
-          {activeView === 'ops' && <RealtimeOpsView summary={summary} devices={devices} warnings={warnings} predictions={predictions} apiState={apiState} onOpenDevice={(code) => { setSelectedDevice(code); setActiveView('realtime'); }} />}
+          {activeView === 'ops' && <RealtimeOpsView summary={summary} devices={devices} warnings={warnings} predictions={predictions} apiState={apiState} diagnostics={data.runtimeDiagnostics} qualitySummary={data.qualitySummary} auditLogs={auditLogs} onOpenDevice={(code) => { setSelectedDevice(code); setActiveView('realtime'); }} />}
           {activeView === 'realtime' && <RealtimeDevicesView devices={devices} selectedDevice={selectedRealtimeDevice} onSelect={setSelectedDevice} />}
           {activeView === 'warnings' && <WarningCenterView warnings={warnings} operator={operator} note={note} actionMessage={actionMessage} onOperatorChange={setOperator} onNoteChange={setNote} onTransition={transitionWarning} />}
           {activeView === 'predictions' && <PredictionsView predictions={predictions} activeModel={data.activeModel} />}
-          {activeView === 'devices' && <DevicesView devices={assets} onOpenRealtime={(code) => { setSelectedDevice(code); setActiveView('realtime'); }} />}
+          {activeView === 'devices' && (
+            <DevicesView
+              devices={assets}
+              busy={apiState.mutating || apiState.refreshing}
+              actionMessage={actionMessage}
+              onOpenRealtime={(code) => { setSelectedDevice(code); setActiveView('realtime'); }}
+              onSaveDevice={saveDevice}
+              onSaveSensorPoint={saveSensorPoint}
+              onDisableSensorPoint={disableSensorPoint}
+            />
+          )}
           {activeView === 'models' && (
             <ModelDataView
               activeModel={data.activeModel}
               models={models}
+              ingressCatalog={data.ingressCatalog}
               busy={apiState.mutating || apiState.refreshing}
               actionMessage={actionMessage}
               onTrain={trainAi4iModel}
@@ -853,7 +1270,7 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
   );
 }
 
-function RealtimeOpsView({ summary, devices, warnings, predictions, apiState, onOpenDevice }: { summary: { onlineTotal: number; deviceTotal: number; warningTotal: number; predictionTotal: number; criticalTotal: number }; devices: RealtimeDevice[]; warnings: WarningRecord[]; predictions: PredictionRecord[]; apiState: ApiState; onOpenDevice: (code: string) => void }) {
+function RealtimeOpsView({ summary, devices, warnings, predictions, apiState, diagnostics, qualitySummary, auditLogs, onOpenDevice }: { summary: { onlineTotal: number; deviceTotal: number; warningTotal: number; predictionTotal: number; criticalTotal: number }; devices: RealtimeDevice[]; warnings: WarningRecord[]; predictions: PredictionRecord[]; apiState: ApiState; diagnostics?: RuntimeDiagnostics; qualitySummary?: QualitySummary; auditLogs: AuditLogRecord[]; onOpenDevice: (code: string) => void }) {
   const activeWarnings = warnings.filter((warning) => !['resolved', 'ignored'].includes(String(warning.status))).slice(0, 6);
   return (
     <div className="console-page">
@@ -896,6 +1313,9 @@ function RealtimeOpsView({ summary, devices, warnings, predictions, apiState, on
         <Panel title="最新预测风险" subtitle="用于解释设备为何进入关注队列">
           <PredictionTable predictions={predictions.slice(0, 6)} />
         </Panel>
+        <RuntimeDiagnosticsPanel diagnostics={diagnostics} />
+        <QualityTracePanel summary={qualitySummary} />
+        <AuditLogPanel logs={auditLogs} />
         <Panel title="链路状态说明" subtitle="区分设备故障与实时链路故障">
           <div className="link-state-box">
             <p>实时工作台读取 `/realtime/overview`、`/warnings` 与 `/predictions`。接口失败时不展示模拟数据；没有后端真实返回的模块保持空态。</p>
@@ -904,6 +1324,131 @@ function RealtimeOpsView({ summary, devices, warnings, predictions, apiState, on
         </Panel>
       </section>
     </div>
+  );
+}
+
+function RuntimeDiagnosticsPanel({ diagnostics }: { diagnostics?: RuntimeDiagnostics }) {
+  const dependencies = diagnostics?.dependencies ?? [];
+  const consumers = diagnostics?.stream_consumers ?? [];
+  const gaps = diagnostics?.production_gaps ?? [];
+  const readiness = diagnostics?.operations_readiness ?? [];
+  return (
+    <Panel title="生产运行诊断" subtitle="每 15 秒检测依赖、消费者、模型与接入配置">
+      <div className="runtime-diagnostics">
+        <div className="runtime-summary">
+          <StatusTag value={diagnostics?.status ?? 'unknown'} />
+          <div>
+            <strong>主入口：{diagnostics?.ingress?.primary?.toUpperCase() ?? '-'}</strong>
+            <span>{diagnostics?.ingress?.broker ?? '-'} · {diagnostics?.ingress?.mqtt_topic ?? '-'}</span>
+          </div>
+        </div>
+        <div className="runtime-check-grid">
+          {dependencies.map((item) => (
+            <div className="runtime-check" key={item.name}>
+              <span>{item.name}</span>
+              <StatusTag value={item.status ?? 'unknown'} />
+              {item.detail && <small>{item.detail}</small>}
+            </div>
+          ))}
+          {consumers.map((item) => (
+            <div className="runtime-check" key={item.name}>
+              <span>{item.name}</span>
+              <StatusTag value={item.enabled ? 'enabled' : 'disabled'} />
+              <small>{item.source ?? '-'} → {item.target ?? '-'}</small>
+              {item.group_id && <small>group: {item.group_id}</small>}
+              {item.responsibility && <small>{item.responsibility}</small>}
+            </div>
+          ))}
+          <div className="runtime-check">
+            <span>active-model</span>
+            <StatusTag value={diagnostics?.active_model?.available ? 'available' : 'missing'} />
+            {diagnostics?.active_model?.model_names?.length ? <small>{diagnostics.active_model.model_names.join(' / ')}</small> : null}
+          </div>
+        </div>
+        <div className="runtime-gaps">
+          {gaps.length === 0 && <div className="empty-inline">当前诊断未发现生产阻断项。</div>}
+          {gaps.map((gap) => <p key={gap}>{gap}</p>)}
+        </div>
+        <div className="readiness-checks">
+          {readiness.map((item) => (
+            <article className="readiness-check" key={item.area}>
+              <div>
+                <strong>{item.area}</strong>
+                <StatusTag value={item.status ?? 'unknown'} />
+              </div>
+              {(item.items ?? []).map((entry) => <p key={entry}>{entry}</p>)}
+            </article>
+          ))}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function QualityTracePanel({ summary }: { summary?: QualitySummary }) {
+  const qualityPoints = summary?.quality_points ?? [];
+  const invalidEvents = summary?.invalid_events ?? [];
+  return (
+    <Panel title="点位质量与异常追踪" subtitle={`最近 ${summary?.window_minutes ?? 60} 分钟；异常来自 Kafka invalid topic`}>
+      <div className="quality-trace">
+        <div className="quality-head">
+          <div>
+            <strong>invalid topic</strong>
+            <span>{summary?.invalid_topic ?? '-'}</span>
+          </div>
+          <StatusTag value={summary?.invalid_trace_status ?? 'unknown'} />
+        </div>
+        {summary?.invalid_trace_error && <div className="quality-error">{summary.invalid_trace_error}</div>}
+        <table className="console-table compact">
+          <thead><tr><th>设备</th><th>点位</th><th>读数</th><th>平均质量</th><th>最低质量</th><th>最后上报</th></tr></thead>
+          <tbody>
+            {qualityPoints.length === 0 && <EmptyTableRow colSpan={6} message="暂无 TSDB 点位质量统计。请确认 cleaned 消费者已写入 telemetry_readings。" />}
+            {qualityPoints.slice(0, 8).map((point) => (
+              <tr key={`${point.device_code}-${point.point_code}`}>
+                <td><strong>{point.device_code}</strong></td>
+                <td>{point.point_code}</td>
+                <td>{point.reading_count ?? 0}</td>
+                <td>{formatPercent(point.average_quality ?? undefined)}</td>
+                <td>{formatPercent(point.min_quality ?? undefined)}</td>
+                <td>{formatDateTime(point.last_seen ?? undefined)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="invalid-event-list">
+          <strong>最近异常遥测</strong>
+          {invalidEvents.length === 0 && <div className="empty-inline">暂无可读取异常事件。若 invalid topic 不可读，上方会显示 unavailable。</div>}
+          {invalidEvents.slice(0, 5).map((event, index) => (
+            <article className="invalid-event" key={`${event.reason}-${index}`}>
+              <span>{event.reason ?? 'unknown invalid telemetry'}</span>
+              <code>{stringifyCompact(event.raw ?? event)}</code>
+            </article>
+          ))}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function AuditLogPanel({ logs }: { logs: AuditLogRecord[] }) {
+  return (
+    <Panel title="操作审计" subtitle="关键生产操作来自 audit_logs，开启鉴权后写操作必须留痕">
+      <table className="console-table compact">
+        <thead><tr><th>时间</th><th>操作者</th><th>角色</th><th>动作</th><th>资源</th></tr></thead>
+        <tbody>
+          {logs.length === 0 && <EmptyTableRow colSpan={5} message="暂无可读取审计日志。未登录或后端未开启鉴权时不会展示生产审计记录。" />}
+          {logs.slice(0, 8).map((log, index) => (
+            <tr key={`${log.id ?? index}-${log.action}`}>
+              <td>{formatDateTime(log.created_at)}</td>
+              <td><strong>{log.actor ?? '-'}</strong></td>
+              <td>{log.role ?? '-'}</td>
+              <td>{log.action ?? '-'}</td>
+              <td>{log.resource ?? '-'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Panel>
   );
 }
 
@@ -1001,10 +1546,160 @@ function PredictionsView({ predictions, activeModel }: { predictions: Prediction
   );
 }
 
-function DevicesView({ devices, onOpenRealtime }: { devices: DeviceRecord[]; onOpenRealtime: (code: string) => void }) {
+function DevicesView({
+  devices,
+  busy,
+  actionMessage,
+  onOpenRealtime,
+  onSaveDevice,
+  onSaveSensorPoint,
+  onDisableSensorPoint,
+}: {
+  devices: DeviceRecord[];
+  busy: boolean;
+  actionMessage: string | null;
+  onOpenRealtime: (code: string) => void;
+  onSaveDevice: (payload: DeviceCatalogPayload) => Promise<void>;
+  onSaveSensorPoint: (deviceCode: string, sensorCode: string, payload: SensorPointPayload) => Promise<void>;
+  onDisableSensorPoint: (deviceCode: string, sensorCode: string) => Promise<void>;
+}) {
+  const [deviceForm, setDeviceForm] = useState<DeviceCatalogPayload>({
+    device_code: '',
+    device_name: '',
+    device_type: 'CNC',
+    factory: 'factory-a',
+    workshop: 'machining',
+    production_line: 'line-1',
+    status: 'online',
+  });
+  const [pointDeviceCode, setPointDeviceCode] = useState(devices[0]?.device_code ?? '');
+  const [sensorCode, setSensorCode] = useState('');
+  const [pointForm, setPointForm] = useState({
+    sensor_name: '',
+    unit: '',
+    sampling_frequency: '1s',
+    protocol: 'opcua',
+    source_address: '',
+    feature_name: '',
+    quality_rule: 'quality=1 when source status is good; quality=0 when bad',
+    min_value: '',
+    max_value: '',
+    enabled: true,
+  });
+
+  useEffect(() => {
+    if (!pointDeviceCode && devices[0]?.device_code) {
+      setPointDeviceCode(devices[0].device_code);
+    }
+  }, [devices, pointDeviceCode]);
+
+  const submitDevice = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!deviceForm.device_code.trim()) return;
+    void onSaveDevice({
+      ...deviceForm,
+      device_code: deviceForm.device_code.trim(),
+      device_name: deviceForm.device_name.trim() || deviceForm.device_code.trim(),
+      device_type: deviceForm.device_type.trim() || 'industrial-machine',
+      factory: deviceForm.factory.trim() || 'default',
+      workshop: deviceForm.workshop.trim() || 'default',
+      production_line: deviceForm.production_line.trim() || 'default',
+      status: deviceForm.status.trim() || 'online',
+    });
+  };
+
+  const submitPoint = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const deviceCode = pointDeviceCode.trim();
+    const code = sensorCode.trim();
+    if (!deviceCode || !code) return;
+    void onSaveSensorPoint(deviceCode, code, {
+      sensor_name: pointForm.sensor_name.trim() || code,
+      unit: pointForm.unit.trim(),
+      sampling_frequency: pointForm.sampling_frequency.trim() || '1s',
+      protocol: pointForm.protocol.trim(),
+      source_address: pointForm.source_address.trim(),
+      feature_name: pointForm.feature_name.trim() || code,
+      quality_rule: pointForm.quality_rule.trim(),
+      min_value: parseOptionalNumber(pointForm.min_value),
+      max_value: parseOptionalNumber(pointForm.max_value),
+      enabled: pointForm.enabled,
+    });
+  };
+
+  const loadDeviceToForm = (device: DeviceRecord) => {
+    setDeviceForm({
+      device_code: device.device_code ?? '',
+      device_name: device.device_name ?? '',
+      device_type: device.device_type ?? 'CNC',
+      factory: device.factory ?? 'factory-a',
+      workshop: device.workshop ?? 'machining',
+      production_line: device.production_line ?? 'line-1',
+      status: device.status ?? 'online',
+    });
+    setPointDeviceCode(device.device_code ?? '');
+  };
+
+  const loadPointToForm = (device: DeviceRecord, point: NonNullable<DeviceRecord['sensor_points']>[number]) => {
+    setPointDeviceCode(device.device_code ?? '');
+    setSensorCode(point.sensor_code ?? '');
+    setPointForm({
+      sensor_name: point.sensor_name ?? '',
+      unit: point.unit ?? '',
+      sampling_frequency: point.sampling_frequency ?? '1s',
+      protocol: point.protocol ?? 'opcua',
+      source_address: point.source_address ?? '',
+      feature_name: point.feature_name ?? '',
+      quality_rule: point.quality_rule ?? 'quality=1 when source status is good; quality=0 when bad',
+      min_value: point.min_value == null ? '' : String(point.min_value),
+      max_value: point.max_value == null ? '' : String(point.max_value),
+      enabled: point.enabled ?? true,
+    });
+  };
+
   return (
     <div className="console-page">
-      <Panel title="设备资产" subtitle="资产页只展示设备基础信息，实时判断以实时监测页为准">
+      <section className="console-grid one-one">
+        <Panel title="设备台账配置" subtitle="维护真实接入链路依赖的设备编号、工厂、车间与产线主数据">
+          <form className="catalog-form" onSubmit={submitDevice}>
+            <div className="catalog-form-grid">
+              <label>设备编号<input value={deviceForm.device_code} onChange={(event) => setDeviceForm((current) => ({ ...current, device_code: event.target.value }))} placeholder="CNC-001" /></label>
+              <label>设备名称<input value={deviceForm.device_name} onChange={(event) => setDeviceForm((current) => ({ ...current, device_name: event.target.value }))} placeholder="一号数控机床" /></label>
+              <label>设备类型<input value={deviceForm.device_type} onChange={(event) => setDeviceForm((current) => ({ ...current, device_type: event.target.value }))} placeholder="CNC" /></label>
+              <label>工厂<input value={deviceForm.factory} onChange={(event) => setDeviceForm((current) => ({ ...current, factory: event.target.value }))} placeholder="factory-a" /></label>
+              <label>车间<input value={deviceForm.workshop} onChange={(event) => setDeviceForm((current) => ({ ...current, workshop: event.target.value }))} placeholder="machining" /></label>
+              <label>产线<input value={deviceForm.production_line} onChange={(event) => setDeviceForm((current) => ({ ...current, production_line: event.target.value }))} placeholder="line-1" /></label>
+              <label>状态<select value={deviceForm.status} onChange={(event) => setDeviceForm((current) => ({ ...current, status: event.target.value }))}><option value="online">online</option><option value="offline">offline</option><option value="maintenance">maintenance</option></select></label>
+            </div>
+            <div className="catalog-actions">
+              <button className="console-primary-action" disabled={busy || !deviceForm.device_code.trim()} type="submit">{busy ? '处理中...' : '保存设备台账'}</button>
+            </div>
+          </form>
+        </Panel>
+        <Panel title="传感器点位配置" subtitle="raw 遥测会按设备、点位、单位和值域校验，不在目录内的数据会进入异常隔离">
+          <form className="catalog-form" onSubmit={submitPoint}>
+            <div className="catalog-form-grid">
+              <label>所属设备<select value={pointDeviceCode} onChange={(event) => setPointDeviceCode(event.target.value)}><option value="">选择设备</option>{devices.map((device) => <option key={device.device_code} value={device.device_code}>{device.device_code}</option>)}</select></label>
+              <label>点位编码<input value={sensorCode} onChange={(event) => setSensorCode(event.target.value)} placeholder="spindle_temperature" /></label>
+              <label>点位名称<input value={pointForm.sensor_name} onChange={(event) => setPointForm((current) => ({ ...current, sensor_name: event.target.value }))} placeholder="主轴温度" /></label>
+              <label>单位<input value={pointForm.unit} onChange={(event) => setPointForm((current) => ({ ...current, unit: event.target.value }))} placeholder="C / A / mm/s / rpm" /></label>
+              <label>采样频率<input value={pointForm.sampling_frequency} onChange={(event) => setPointForm((current) => ({ ...current, sampling_frequency: event.target.value }))} placeholder="1s" /></label>
+              <label>现场协议<select value={pointForm.protocol} onChange={(event) => setPointForm((current) => ({ ...current, protocol: event.target.value }))}><option value="opcua">OPC UA</option><option value="modbus-tcp">Modbus TCP</option><option value="s7">Siemens S7</option><option value="ethernet-ip">EtherNet/IP</option><option value="cnc-vendor">CNC Vendor</option></select></label>
+              <label>协议源地址<input value={pointForm.source_address} onChange={(event) => setPointForm((current) => ({ ...current, source_address: event.target.value }))} placeholder="ns=2;s=CNC001.Spindle.Temp / 40001 / DB1.DBD0" /></label>
+              <label>模型特征名<input value={pointForm.feature_name} onChange={(event) => setPointForm((current) => ({ ...current, feature_name: event.target.value }))} placeholder="spindle_temperature_mean" /></label>
+              <label>质量规则<input value={pointForm.quality_rule} onChange={(event) => setPointForm((current) => ({ ...current, quality_rule: event.target.value }))} placeholder="source bad => quality=0" /></label>
+              <label>最小值<input value={pointForm.min_value} onChange={(event) => setPointForm((current) => ({ ...current, min_value: event.target.value }))} inputMode="decimal" placeholder="0" /></label>
+              <label>最大值<input value={pointForm.max_value} onChange={(event) => setPointForm((current) => ({ ...current, max_value: event.target.value }))} inputMode="decimal" placeholder="120" /></label>
+              <label className="checkbox-row catalog-checkbox"><input checked={pointForm.enabled} type="checkbox" onChange={(event) => setPointForm((current) => ({ ...current, enabled: event.target.checked }))} />启用点位</label>
+            </div>
+            <div className="catalog-actions">
+              <button className="console-primary-action" disabled={busy || !pointDeviceCode.trim() || !sensorCode.trim()} type="submit">{busy ? '处理中...' : '保存点位规则'}</button>
+            </div>
+          </form>
+        </Panel>
+      </section>
+      {actionMessage && <div className="catalog-message">{actionMessage}</div>}
+      <Panel title="设备资产" subtitle="设备台账与点位目录是 MQTT 生产接入、数据质量校验和模型特征映射的基础">
         <table className="console-table">
           <thead><tr><th>设备编号</th><th>设备名称</th><th>类型</th><th>工厂</th><th>车间/产线</th><th>状态</th><th>健康评分</th><th>风险</th><th>传感器点位</th><th>操作</th></tr></thead>
           <tbody>
@@ -1019,8 +1714,35 @@ function DevicesView({ devices, onOpenRealtime }: { devices: DeviceRecord[]; onO
                 <td>{device.status ?? '-'}</td>
                 <td>{device.health_score ?? '-'}</td>
                 <td><RiskBadge level={device.risk_level ?? 'unknown'} /></td>
-                <td>{device.sensor_points?.map((point) => point.sensor_code).join('、') || '-'}</td>
-                <td><button className="table-action" onClick={() => onOpenRealtime(device.device_code ?? '')}>实时详情</button></td>
+                <td>
+                  <div className="point-chip-list">
+                    {(device.sensor_points ?? []).length === 0 && <span className="muted-cell">未配置</span>}
+                    {(device.sensor_points ?? []).map((point) => (
+                      <span className={`point-chip ${point.enabled === false ? 'disabled' : ''}`} key={`${device.device_code}-${point.sensor_code}`}>
+                        <button type="button" onClick={() => loadPointToForm(device, point)}>{point.sensor_code}</button>
+                        <small>{point.protocol || '-'} · {point.unit || '-'} · {formatRange(point.min_value, point.max_value)}</small>
+                        <small>{point.source_address || '未配置源地址'}</small>
+                        {point.enabled === false && <em>停用</em>}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                <td>
+                  <div className="table-actions">
+                    <button className="table-action" onClick={() => loadDeviceToForm(device)}>编辑台账</button>
+                    <button className="table-action" onClick={() => onOpenRealtime(device.device_code ?? '')}>实时详情</button>
+                    {(device.sensor_points ?? []).filter((point) => point.enabled !== false).map((point) => (
+                      <button
+                        className="table-action danger"
+                        disabled={busy}
+                        key={`${device.device_code}-${point.sensor_code}-disable`}
+                        onClick={() => void onDisableSensorPoint(device.device_code ?? '', point.sensor_code ?? '')}
+                      >
+                        停用 {point.sensor_code}
+                      </button>
+                    ))}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -1033,6 +1755,7 @@ function DevicesView({ devices, onOpenRealtime }: { devices: DeviceRecord[]; onO
 function ModelDataView({
   activeModel,
   models,
+  ingressCatalog,
   busy,
   actionMessage,
   onTrain,
@@ -1040,6 +1763,7 @@ function ModelDataView({
 }: {
   activeModel?: ActiveModelState;
   models: ModelMetric[];
+  ingressCatalog?: IngressCatalog;
   busy: boolean;
   actionMessage: string | null;
   onTrain: (file: File, replayDemoData: boolean) => Promise<void>;
@@ -1092,6 +1816,80 @@ function ModelDataView({
           </div>
         </Panel>
       </section>
+      <section className="console-grid one-one">
+        <Panel title="真实设备接入目录" subtitle="生产主入口为 MQTT，HTTP / WebSocket 仅作为联调旁路">
+          <div className="ingress-catalog-panel">
+            <dl className="detail-list">
+              <div><dt>主入口</dt><dd>{ingressCatalog?.primary_ingress?.toUpperCase() ?? '-'}</dd></div>
+              <div><dt>MQTT Topic</dt><dd>{ingressCatalog?.mqtt_topic ?? '-'}</dd></div>
+              <div><dt>示例 Topic</dt><dd>{ingressCatalog?.mqtt_example_topic ?? '-'}</dd></div>
+              <div><dt>字段契约</dt><dd>{ingressCatalog?.payload_schema?.join(' / ') ?? '-'}</dd></div>
+              <div><dt>发布模式</dt><dd>{ingressCatalog?.edge_adapter_contract?.publish_mode ?? '-'}</dd></div>
+              <div><dt>协议适配</dt><dd>{ingressCatalog?.edge_adapter_contract?.required_protocol_adapter ?? '-'}</dd></div>
+            </dl>
+            <div className="ingress-rule-list">
+              {(ingressCatalog?.gateway_responsibility ?? []).map((item) => <p key={item}>{item}</p>)}
+            </div>
+          </div>
+        </Panel>
+        <Panel title="点位治理缺口" subtitle="这些问题会影响真实设备接入和模型特征一致性">
+          <div className="runtime-gaps">
+            {(ingressCatalog?.production_gaps ?? []).length === 0 && <div className="empty-inline">当前设备点位目录未发现生产阻断项。</div>}
+            {(ingressCatalog?.production_gaps ?? []).map((gap) => <p key={gap}>{gap}</p>)}
+          </div>
+        </Panel>
+      </section>
+      <Panel title="边缘网关配置包" subtitle="交给网关工程师配置 Modbus / OPC UA / S7 采集映射，发布到对应 MQTT topic">
+        <div className="edge-mapping-list">
+          {(ingressCatalog?.edge_gateway_mappings ?? []).length === 0 && <div className="empty-inline">暂无边缘网关映射。请先在设备资产页配置设备和点位。</div>}
+          {(ingressCatalog?.edge_gateway_mappings ?? []).map((mapping) => (
+            <article className="edge-mapping-card" key={mapping.device_code}>
+              <header>
+                <div>
+                  <strong>{mapping.device_code}</strong>
+                  <span>{mapping.factory} / {mapping.workshop} / {mapping.production_line}</span>
+                </div>
+                <code>{mapping.mqtt_topic}</code>
+              </header>
+              <table className="console-table compact">
+                <thead><tr><th>点位</th><th>协议地址</th><th>单位</th><th>频率</th><th>特征映射</th><th>质量规则</th><th>Payload 模板</th></tr></thead>
+                <tbody>
+                  {(mapping.points ?? []).length === 0 && <EmptyTableRow colSpan={7} message="该设备暂无可发布点位。" />}
+                  {(mapping.points ?? []).map((point) => (
+                    <tr key={`${mapping.device_code}-${point.point_code}`}>
+                      <td><strong>{point.point_code}</strong><br />{point.point_name ?? '-'}</td>
+                      <td>{point.protocol ?? '-'}<br /><code>{point.source_address ?? '-'}</code></td>
+                      <td>{point.unit ?? '-'}</td>
+                      <td>{point.sampling_frequency ?? '-'}</td>
+                      <td>{point.feature_name ?? '-'}</td>
+                      <td>{point.quality_rule ?? '-'}</td>
+                      <td><code>{stringifyCompact(point.target_payload)}</code></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </article>
+          ))}
+        </div>
+      </Panel>
+      <Panel title="设备点位目录" subtitle="来自设备台账 sensor_points，raw 遥测会按此目录校验设备、点位、单位和值域">
+        <table className="console-table compact">
+          <thead><tr><th>设备</th><th>点位</th><th>名称</th><th>单位</th><th>值域</th><th>启用</th></tr></thead>
+          <tbody>
+            {flattenSensorPoints(ingressCatalog?.devices).length === 0 && <EmptyTableRow colSpan={6} message="暂无设备点位目录。真实接入前需要先配置设备与点位主数据。" />}
+            {flattenSensorPoints(ingressCatalog?.devices).map((point) => (
+              <tr key={`${point.device_code}-${point.sensor_code}`}>
+                <td><strong>{point.device_code}</strong></td>
+                <td>{point.sensor_code}</td>
+                <td>{point.sensor_name ?? '-'}</td>
+                <td>{point.unit ?? '-'}</td>
+                <td>{formatRange(point.min_value, point.max_value)}</td>
+                <td>{point.enabled ? '启用' : '停用'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
       <Panel title="模型指标" subtitle="来自 MySQL model_versions / metrics">
         <table className="console-table compact">
           <thead><tr><th>模型</th><th>类型</th><th>版本</th><th>指标</th><th>值</th><th>状态</th></tr></thead>
@@ -1111,6 +1909,36 @@ function EmptyTableRow({ colSpan, message }: { colSpan: number; message: string 
       <td className="empty-table-cell" colSpan={colSpan}>{message}</td>
     </tr>
   );
+}
+
+function flattenSensorPoints(devices?: DeviceRecord[]) {
+  return (devices ?? []).flatMap((device) =>
+    (device.sensor_points ?? []).map((point) => ({
+      ...point,
+      device_code: device.device_code,
+    })),
+  );
+}
+
+function formatRange(minValue?: number | null, maxValue?: number | null) {
+  if (minValue == null && maxValue == null) return '-';
+  return `${minValue ?? '-'} ~ ${maxValue ?? '-'}`;
+}
+
+function parseOptionalNumber(value: string) {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function stringifyCompact(value: unknown) {
+  if (typeof value === 'string') return value.length > 220 ? `${value.slice(0, 220)}...` : value;
+  try {
+    const text = JSON.stringify(value);
+    return text.length > 220 ? `${text.slice(0, 220)}...` : text;
+  } catch {
+    return String(value);
+  }
 }
 
 function PredictionTable({ predictions }: { predictions: PredictionRecord[] }) {

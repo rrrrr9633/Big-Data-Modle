@@ -8,8 +8,8 @@ from app.ingestion.http_adapter import publish_payload_to_raw_topic
 from app.ingestion.http_schemas import parse_telemetry_payload
 from app.ingestion.mqtt_simulator import build_device_telemetry_topic, publish_payload_to_mqtt
 from app.repositories.maintenance_repository import readings_from_rows
-from app.streams.kafka_client import parse_kafka_api_version
 from app.streams import runtime
+from app.streams.kafka_client import parse_kafka_api_version
 
 
 def test_telemetry_payload_accepts_device_readings() -> None:

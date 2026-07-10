@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from app.api.v1 import ingestion
 from app.ingestion.ai4i import transform_ai4i_row
+from app.security.auth import CurrentUser
 
 
 def test_transform_ai4i_row_maps_machine_to_device_and_sensor_readings() -> None:
@@ -61,6 +62,9 @@ class FakeUploadFileWithTwoRows:
         )
 
 
+TEST_USER = CurrentUser(username="admin", role="admin")
+
+
 def test_ai4i_import_trains_without_replaying_demo_data_by_default(monkeypatch) -> None:
     calls: list[str] = []
     suite = SimpleNamespace(
@@ -98,8 +102,9 @@ def test_ai4i_import_trains_without_replaying_demo_data_by_default(monkeypatch) 
         lambda *_args, **_kwargs: calls.append("metric"),
     )
     monkeypatch.setattr(ingestion, "save_active_model_suite", lambda _suite: calls.append("save"))
+    monkeypatch.setattr(ingestion, "insert_audit_log", lambda *_args, **_kwargs: None)
 
-    response = asyncio.run(ingestion.import_ai4i_csv(FakeUploadFile(), db))
+    response = asyncio.run(ingestion.import_ai4i_csv(FakeUploadFile(), db, TEST_USER))
 
     assert response["mode"] == "train_only"
     assert response["trained_rows"] == 1
@@ -144,9 +149,10 @@ def test_ai4i_import_can_replay_demo_data_when_enabled(monkeypatch) -> None:
     )
     monkeypatch.setattr(ingestion, "predict_ai4i_feature_row", fake_predict_ai4i_feature_row)
     monkeypatch.setattr(ingestion, "explain_ai4i_feature_row", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(ingestion, "insert_audit_log", lambda *_args, **_kwargs: None)
 
     response = asyncio.run(
-        ingestion.import_ai4i_csv(FakeUploadFileWithTwoRows(), db, replay_demo_data=True)
+        ingestion.import_ai4i_csv(FakeUploadFileWithTwoRows(), db, TEST_USER, replay_demo_data=True)
     )
 
     assert response["mode"] == "train_and_replay"

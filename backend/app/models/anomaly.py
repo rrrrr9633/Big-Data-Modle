@@ -19,10 +19,7 @@ def detect_anomaly(window: TimeSeriesWindow, *, threshold: float = 0.65) -> Anom
     quality_penalty = _clip01(1 - features.get("quality_mean", 1.0))
 
     score = _clip01(
-        peak_score * 0.4
-        + trend_score * 0.3
-        + volatility_score * 0.2
-        + quality_penalty * 0.1
+        peak_score * 0.4 + trend_score * 0.3 + volatility_score * 0.2 + quality_penalty * 0.1
     )
 
     reasons = []

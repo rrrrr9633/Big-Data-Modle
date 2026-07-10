@@ -8,13 +8,17 @@ from app.models.registry import (
 )
 from app.repositories.maintenance_repository import (
     fetch_model_versions,
+    insert_audit_log,
     reset_training_records,
 )
+from app.security.auth import CurrentUser
+from app.security.policies import require_permission
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
+ModelActivateUser = Annotated[CurrentUser, Depends(require_permission("model.activate"))]
 
 
 @router.get("/active")
@@ -28,9 +32,17 @@ def list_model_versions(db: DbSession) -> list[dict[str, Any]]:
 
 
 @router.delete("/active")
-def reset_active_model(db: DbSession) -> dict[str, object]:
+def reset_active_model(db: DbSession, user: ModelActivateUser) -> dict[str, object]:
     deleted_records = reset_training_records(db)
     deleted_artifacts = delete_active_model_artifacts()
+    insert_audit_log(
+        db,
+        actor=user.username,
+        role=user.role,
+        action="reset_active_model",
+        resource="model:active",
+        detail={"deleted_records": deleted_records, **deleted_artifacts},
+    )
     db.commit()
     return {
         "status": "reset",

@@ -252,3 +252,37 @@ def fetch_latest_telemetry_points(
         }
         for row in rows
     ]
+
+
+def fetch_point_quality_summary(*, minutes: int = 60, limit: int = 100) -> list[dict[str, object]]:
+    with tsdb_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                  device_code,
+                  point_code,
+                  COUNT(*) AS reading_count,
+                  AVG(quality) AS average_quality,
+                  MIN(quality) AS min_quality,
+                  MAX(time) AS last_seen
+                FROM telemetry_readings
+                WHERE time >= NOW() - (%s || ' minutes')::interval
+                GROUP BY device_code, point_code
+                ORDER BY average_quality ASC, last_seen DESC
+                LIMIT %s
+                """,
+                (minutes, limit),
+            )
+            rows = cursor.fetchall()
+    return [
+        {
+            "device_code": str(row[0]),
+            "point_code": str(row[1]),
+            "reading_count": int(row[2] or 0),
+            "average_quality": float(row[3]) if row[3] is not None else None,
+            "min_quality": float(row[4]) if row[4] is not None else None,
+            "last_seen": row[5].isoformat() if row[5] is not None else None,
+        }
+        for row in rows
+    ]

@@ -21,6 +21,11 @@ CREATE TABLE IF NOT EXISTS sensor_points (
   device_code VARCHAR(64) NOT NULL,
   unit VARCHAR(32) NULL,
   sampling_frequency VARCHAR(64) NOT NULL DEFAULT 'realtime',
+  protocol VARCHAR(64) NULL,
+  source_address VARCHAR(255) NULL,
+  protocol_options JSON NULL,
+  feature_name VARCHAR(128) NULL,
+  quality_rule VARCHAR(255) NULL,
   min_value DOUBLE NULL,
   max_value DOUBLE NULL,
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -132,6 +137,42 @@ CREATE TABLE IF NOT EXISTS warning_action_logs (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_warning_action_warning_time (warning_id, created_at),
   CONSTRAINT fk_warning_action_event FOREIGN KEY (warning_id) REFERENCES warning_events(id)
+);
+
+CREATE TABLE IF NOT EXISTS master_data_change_requests (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  entity_type VARCHAR(32) NOT NULL,
+  operation VARCHAR(32) NOT NULL,
+  device_code VARCHAR(64) NOT NULL,
+  sensor_code VARCHAR(64) NULL,
+  payload_json JSON NOT NULL,
+  impact_json JSON NULL,
+  reason TEXT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'pending',
+  requested_by VARCHAR(64) NOT NULL,
+  requested_role VARCHAR(32) NOT NULL,
+  approved_by VARCHAR(64) NULL,
+  approved_role VARCHAR(32) NULL,
+  decision_comment TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  decided_at TIMESTAMP NULL,
+  INDEX idx_master_data_change_status_time (status, created_at),
+  INDEX idx_master_data_change_resource (device_code, sensor_code)
+);
+
+CREATE TABLE IF NOT EXISTS master_data_versions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  change_request_id BIGINT NOT NULL,
+  entity_type VARCHAR(32) NOT NULL,
+  device_code VARCHAR(64) NOT NULL,
+  sensor_code VARCHAR(64) NULL,
+  snapshot_json JSON NOT NULL,
+  published_by VARCHAR(64) NOT NULL,
+  published_role VARCHAR(32) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_master_data_version_resource_time (device_code, sensor_code, created_at),
+  CONSTRAINT fk_master_data_version_change
+    FOREIGN KEY (change_request_id) REFERENCES master_data_change_requests(id)
 );
 
 CREATE TABLE IF NOT EXISTS maintenance_records (

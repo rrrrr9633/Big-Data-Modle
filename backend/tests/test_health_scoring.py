@@ -17,9 +17,7 @@ def _window(**feature_values: float) -> TimeSeriesWindow:
 
 
 def test_detect_anomaly_scores_peak_trend_and_quality() -> None:
-    result = detect_anomaly(
-        _window(peak=3.5, trend=1.2, rolling_std_last_3=1.0, quality_mean=0.7)
-    )
+    result = detect_anomaly(_window(peak=3.5, trend=1.2, rolling_std_last_3=1.0, quality_mean=0.7))
 
     assert result.is_anomaly is True
     assert result.anomaly_score >= 0.7

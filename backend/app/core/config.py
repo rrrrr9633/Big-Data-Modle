@@ -39,6 +39,20 @@ class Settings(BaseSettings):
     feature_consumer_enabled: bool = False
     inference_consumer_enabled: bool = False
     warning_suppression_seconds: int = 60
+    auth_enabled: bool = False
+    auth_admin_username: str = "admin"
+    auth_admin_password: str = "admin123"
+    auth_token_secret: str = "change-me-in-production"
+    auth_token_ttl_seconds: int = 28800
+
+    emqx_management_url: str = ""
+    emqx_management_username: str = ""
+    emqx_management_password: str = ""
+    prometheus_url: str = ""
+    grafana_url: str = ""
+    backup_status_file: str = ""
+    supervision_mode: str = ""
+    ops_http_timeout_seconds: float = 3.0
 
 
 @lru_cache

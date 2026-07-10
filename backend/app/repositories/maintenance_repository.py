@@ -17,6 +17,10 @@ def _rows(result: Any) -> list[dict[str, Any]]:
             "sensor_points",
             "action_logs",
             "warning_explanation",
+            "protocol_options",
+            "payload",
+            "impact",
+            "snapshot",
         ):
             if isinstance(row.get(key), str):
                 try:
@@ -27,9 +31,10 @@ def _rows(result: Any) -> list[dict[str, Any]]:
 
 
 def fetch_dashboard_summary(db: Session) -> dict[str, int | float]:
-    row = db.execute(
-        text(
-            """
+    row = (
+        db.execute(
+            text(
+                """
             SELECT
               (SELECT COUNT(*) FROM devices) AS device_total,
               (SELECT COUNT(DISTINCT device_code)
@@ -43,8 +48,11 @@ def fetch_dashboard_summary(db: Session) -> dict[str, int | float]:
                  FROM warning_events
                 WHERE DATE(created_at) = CURRENT_DATE()) AS today_warning_total
             """
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     return {
         "device_total": int(row["device_total"] or 0),
         "abnormal_device_total": int(row["abnormal_device_total"] or 0),
@@ -84,6 +92,11 @@ def fetch_devices(db: Session) -> list[dict[str, Any]]:
                       'device_code', sp.device_code,
                       'unit', sp.unit,
                       'sampling_frequency', sp.sampling_frequency,
+                      'protocol', sp.protocol,
+                      'source_address', sp.source_address,
+                      'protocol_options', COALESCE(sp.protocol_options, JSON_OBJECT()),
+                      'feature_name', sp.feature_name,
+                      'quality_rule', sp.quality_rule,
                       'min_value', sp.min_value,
                       'max_value', sp.max_value,
                       'enabled', sp.enabled
@@ -434,9 +447,17 @@ def upsert_sensor_point(
     *,
     device_code: str,
     sensor_code: str,
+    sensor_name: str | None = None,
     unit: str | None,
+    sampling_frequency: str = "realtime",
+    protocol: str | None = None,
+    source_address: str | None = None,
+    protocol_options: dict[str, Any] | None = None,
+    feature_name: str | None = None,
+    quality_rule: str | None = None,
     min_value: float | None = None,
     max_value: float | None = None,
+    enabled: bool = True,
 ) -> None:
     db.execute(
         text(
@@ -447,6 +468,11 @@ def upsert_sensor_point(
               device_code,
               unit,
               sampling_frequency,
+              protocol,
+              source_address,
+              protocol_options,
+              feature_name,
+              quality_rule,
               min_value,
               max_value,
               enabled
@@ -456,14 +482,25 @@ def upsert_sensor_point(
               :sensor_name,
               :device_code,
               :unit,
-              'realtime',
+              :sampling_frequency,
+              :protocol,
+              :source_address,
+              :protocol_options,
+              :feature_name,
+              :quality_rule,
               :min_value,
               :max_value,
-              TRUE
+              :enabled
             )
             ON DUPLICATE KEY UPDATE
               sensor_name = VALUES(sensor_name),
               unit = VALUES(unit),
+              sampling_frequency = VALUES(sampling_frequency),
+              protocol = VALUES(protocol),
+              source_address = VALUES(source_address),
+              protocol_options = VALUES(protocol_options),
+              feature_name = VALUES(feature_name),
+              quality_rule = VALUES(quality_rule),
               min_value = COALESCE(
                 LEAST(sensor_points.min_value, VALUES(min_value)),
                 VALUES(min_value),
@@ -474,18 +511,296 @@ def upsert_sensor_point(
                 VALUES(max_value),
                 sensor_points.max_value
               ),
-              enabled = TRUE
+              enabled = VALUES(enabled)
             """
         ),
         {
             "sensor_code": sensor_code,
-            "sensor_name": sensor_code.replace("_", " ").title(),
+            "sensor_name": sensor_name or sensor_code.replace("_", " ").title(),
             "device_code": device_code,
             "unit": unit,
+            "sampling_frequency": sampling_frequency,
+            "protocol": protocol,
+            "source_address": source_address,
+            "protocol_options": json.dumps(protocol_options or {}, ensure_ascii=False),
+            "feature_name": feature_name,
+            "quality_rule": quality_rule,
             "min_value": min_value,
             "max_value": max_value,
+            "enabled": enabled,
         },
     )
+
+
+def disable_sensor_point(db: Session, *, device_code: str, sensor_code: str) -> None:
+    db.execute(
+        text(
+            """
+            UPDATE sensor_points
+            SET enabled = FALSE
+            WHERE device_code = :device_code AND sensor_code = :sensor_code
+            """
+        ),
+        {"device_code": device_code, "sensor_code": sensor_code},
+    )
+
+
+def insert_master_data_change_request(
+    db: Session,
+    *,
+    entity_type: str,
+    operation: str,
+    device_code: str,
+    sensor_code: str | None,
+    payload: dict[str, Any],
+    impact: dict[str, Any],
+    reason: str | None,
+    requested_by: str,
+    requested_role: str,
+) -> int:
+    result = db.execute(
+        text(
+            """
+            INSERT INTO master_data_change_requests (
+              entity_type,
+              operation,
+              device_code,
+              sensor_code,
+              payload_json,
+              impact_json,
+              reason,
+              requested_by,
+              requested_role,
+              status
+            )
+            VALUES (
+              :entity_type,
+              :operation,
+              :device_code,
+              :sensor_code,
+              :payload_json,
+              :impact_json,
+              :reason,
+              :requested_by,
+              :requested_role,
+              'pending'
+            )
+            """
+        ),
+        {
+            "entity_type": entity_type,
+            "operation": operation,
+            "device_code": device_code,
+            "sensor_code": sensor_code,
+            "payload_json": json.dumps(payload, ensure_ascii=False),
+            "impact_json": json.dumps(impact, ensure_ascii=False),
+            "reason": reason,
+            "requested_by": requested_by,
+            "requested_role": requested_role,
+        },
+    )
+    return int(result.lastrowid or 0)
+
+
+def fetch_master_data_change_requests(db: Session, limit: int = 100) -> list[dict[str, Any]]:
+    result = db.execute(
+        text(
+            """
+            SELECT
+              id,
+              entity_type,
+              operation,
+              device_code,
+              sensor_code,
+              payload_json AS payload,
+              impact_json AS impact,
+              reason,
+              status,
+              requested_by,
+              requested_role,
+              approved_by,
+              approved_role,
+              decision_comment,
+              created_at,
+              decided_at
+            FROM master_data_change_requests
+            ORDER BY created_at DESC, id DESC
+            LIMIT :limit
+            """
+        ),
+        {"limit": limit},
+    )
+    return _rows(result)
+
+
+def fetch_master_data_change_request(db: Session, change_request_id: int) -> dict[str, Any] | None:
+    result = db.execute(
+        text(
+            """
+            SELECT
+              id,
+              entity_type,
+              operation,
+              device_code,
+              sensor_code,
+              payload_json AS payload,
+              impact_json AS impact,
+              reason,
+              status,
+              requested_by,
+              requested_role,
+              approved_by,
+              approved_role,
+              decision_comment,
+              created_at,
+              decided_at
+            FROM master_data_change_requests
+            WHERE id = :id
+            """
+        ),
+        {"id": change_request_id},
+    )
+    rows = _rows(result)
+    return rows[0] if rows else None
+
+
+def mark_master_data_change_request_decision(
+    db: Session,
+    *,
+    change_request_id: int,
+    status: str,
+    approved_by: str,
+    approved_role: str,
+    decision_comment: str | None,
+) -> None:
+    db.execute(
+        text(
+            """
+            UPDATE master_data_change_requests
+            SET
+              status = :status,
+              approved_by = :approved_by,
+              approved_role = :approved_role,
+              decision_comment = :decision_comment,
+              decided_at = CURRENT_TIMESTAMP
+            WHERE id = :id
+            """
+        ),
+        {
+            "id": change_request_id,
+            "status": status,
+            "approved_by": approved_by,
+            "approved_role": approved_role,
+            "decision_comment": decision_comment,
+        },
+    )
+
+
+def insert_master_data_version(
+    db: Session,
+    *,
+    change_request_id: int,
+    entity_type: str,
+    device_code: str,
+    sensor_code: str | None,
+    snapshot: dict[str, Any],
+    published_by: str,
+    published_role: str,
+) -> int:
+    result = db.execute(
+        text(
+            """
+            INSERT INTO master_data_versions (
+              change_request_id,
+              entity_type,
+              device_code,
+              sensor_code,
+              snapshot_json,
+              published_by,
+              published_role
+            )
+            VALUES (
+              :change_request_id,
+              :entity_type,
+              :device_code,
+              :sensor_code,
+              :snapshot_json,
+              :published_by,
+              :published_role
+            )
+            """
+        ),
+        {
+            "change_request_id": change_request_id,
+            "entity_type": entity_type,
+            "device_code": device_code,
+            "sensor_code": sensor_code,
+            "snapshot_json": json.dumps(snapshot, ensure_ascii=False),
+            "published_by": published_by,
+            "published_role": published_role,
+        },
+    )
+    return int(result.lastrowid or 0)
+
+
+def insert_audit_log(
+    db: Session,
+    *,
+    actor: str,
+    role: str,
+    action: str,
+    resource: str,
+    detail: dict[str, Any] | None = None,
+) -> None:
+    db.execute(
+        text(
+            """
+            INSERT INTO audit_logs (
+              actor,
+              role,
+              action,
+              resource,
+              detail_json
+            )
+            VALUES (
+              :actor,
+              :role,
+              :action,
+              :resource,
+              :detail_json
+            )
+            """
+        ),
+        {
+            "actor": actor,
+            "role": role,
+            "action": action,
+            "resource": resource,
+            "detail_json": json.dumps(detail or {}, ensure_ascii=False),
+        },
+    )
+
+
+def fetch_audit_logs(db: Session, limit: int = 100) -> list[dict[str, Any]]:
+    result = db.execute(
+        text(
+            """
+            SELECT
+              id,
+              actor,
+              role,
+              action,
+              resource,
+              detail_json,
+              created_at
+            FROM audit_logs
+            ORDER BY created_at DESC, id DESC
+            LIMIT :limit
+            """
+        ),
+        {"limit": limit},
+    )
+    return _rows(result)
 
 
 def insert_sensor_reading(
@@ -686,6 +1001,8 @@ def reset_training_records(db: Session) -> dict[str, int]:
         "prediction_logs",
         "feature_windows",
         "sensor_readings",
+        "master_data_versions",
+        "master_data_change_requests",
         "sensor_points",
         "devices",
         "data_import_batches",
@@ -761,6 +1078,11 @@ def ensure_prediction_model_schema(db: Session) -> None:
           device_code VARCHAR(64) NOT NULL,
           unit VARCHAR(32) NULL,
           sampling_frequency VARCHAR(64) NOT NULL DEFAULT 'realtime',
+          protocol VARCHAR(64) NULL,
+          source_address VARCHAR(255) NULL,
+          protocol_options JSON NULL,
+          feature_name VARCHAR(128) NULL,
+          quality_rule VARCHAR(255) NULL,
           min_value DOUBLE NULL,
           max_value DOUBLE NULL,
           enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -772,6 +1094,11 @@ def ensure_prediction_model_schema(db: Session) -> None:
             FOREIGN KEY (device_code) REFERENCES devices(device_code)
         )
         """,
+        "ALTER TABLE sensor_points ADD COLUMN protocol VARCHAR(64) NULL",
+        "ALTER TABLE sensor_points ADD COLUMN source_address VARCHAR(255) NULL",
+        "ALTER TABLE sensor_points ADD COLUMN protocol_options JSON NULL",
+        "ALTER TABLE sensor_points ADD COLUMN feature_name VARCHAR(128) NULL",
+        "ALTER TABLE sensor_points ADD COLUMN quality_rule VARCHAR(255) NULL",
         "ALTER TABLE prediction_logs ADD COLUMN feature_window_id BIGINT NULL",
         "ALTER TABLE prediction_logs ADD COLUMN model_version VARCHAR(64) NULL",
         "ALTER TABLE prediction_logs ADD INDEX idx_prediction_window (feature_window_id)",
@@ -819,6 +1146,57 @@ def ensure_prediction_model_schema(db: Session) -> None:
           created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
           INDEX idx_warning_action_warning_time (warning_id, created_at),
           CONSTRAINT fk_warning_action_event FOREIGN KEY (warning_id) REFERENCES warning_events(id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS master_data_change_requests (
+          id BIGINT PRIMARY KEY AUTO_INCREMENT,
+          entity_type VARCHAR(32) NOT NULL,
+          operation VARCHAR(32) NOT NULL,
+          device_code VARCHAR(64) NOT NULL,
+          sensor_code VARCHAR(64) NULL,
+          payload_json JSON NOT NULL,
+          impact_json JSON NULL,
+          reason TEXT NULL,
+          status VARCHAR(32) NOT NULL DEFAULT 'pending',
+          requested_by VARCHAR(64) NOT NULL,
+          requested_role VARCHAR(32) NOT NULL,
+          approved_by VARCHAR(64) NULL,
+          approved_role VARCHAR(32) NULL,
+          decision_comment TEXT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          decided_at TIMESTAMP NULL,
+          INDEX idx_master_data_change_status_time (status, created_at),
+          INDEX idx_master_data_change_resource (device_code, sensor_code)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS master_data_versions (
+          id BIGINT PRIMARY KEY AUTO_INCREMENT,
+          change_request_id BIGINT NOT NULL,
+          entity_type VARCHAR(32) NOT NULL,
+          device_code VARCHAR(64) NOT NULL,
+          sensor_code VARCHAR(64) NULL,
+          snapshot_json JSON NOT NULL,
+          published_by VARCHAR(64) NOT NULL,
+          published_role VARCHAR(32) NOT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_master_data_version_resource_time (device_code, sensor_code, created_at),
+          CONSTRAINT fk_master_data_version_change
+            FOREIGN KEY (change_request_id) REFERENCES master_data_change_requests(id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS audit_logs (
+          id BIGINT PRIMARY KEY AUTO_INCREMENT,
+          actor VARCHAR(64) NOT NULL,
+          role VARCHAR(32) NOT NULL,
+          action VARCHAR(128) NOT NULL,
+          resource VARCHAR(255) NOT NULL,
+          detail_json JSON NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_audit_actor_time (actor, created_at),
+          INDEX idx_audit_resource_time (resource, created_at)
         )
         """,
     ]

@@ -1,3 +1,4 @@
+from app.core.config import settings
 from app.ingestion.http_adapter import publish_payload_to_raw_topic
 from app.ingestion.http_schemas import (
     TelemetryPayloadIn,
@@ -5,12 +6,13 @@ from app.ingestion.http_schemas import (
     parse_telemetry_payload,
 )
 from app.ingestion.mqtt_simulator import publish_payload_to_mqtt
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from app.security.auth import require_admin, verify_access_token
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 
 router = APIRouter()
 
 
-@router.post("/readings", status_code=202)
+@router.post("/readings", status_code=202, dependencies=[Depends(require_admin)])
 def ingest_realtime_readings(payload: TelemetryPayloadIn) -> dict[str, object]:
     try:
         return publish_payload_to_raw_topic(payload, protocol="http")
@@ -18,7 +20,7 @@ def ingest_realtime_readings(payload: TelemetryPayloadIn) -> dict[str, object]:
         raise HTTPException(status_code=503, detail=f"遥测事件写入 Kafka raw 失败：{exc}") from exc
 
 
-@router.post("/mqtt/simulate", status_code=202)
+@router.post("/mqtt/simulate", status_code=202, dependencies=[Depends(require_admin)])
 def simulate_mqtt_realtime_readings(payload: TelemetryPayloadIn) -> dict[str, object]:
     try:
         return publish_payload_to_mqtt(payload)
@@ -28,6 +30,16 @@ def simulate_mqtt_realtime_readings(payload: TelemetryPayloadIn) -> dict[str, ob
 
 @router.websocket("/ws/readings")
 async def ingest_realtime_readings_ws(websocket: WebSocket) -> None:
+    if settings.auth_enabled:
+        token = websocket.query_params.get("token")
+        if not token:
+            await websocket.close(code=1008, reason="missing token")
+            return
+        try:
+            verify_access_token(token)
+        except Exception:
+            await websocket.close(code=1008, reason="invalid token")
+            return
     await websocket.accept()
     try:
         while True:
