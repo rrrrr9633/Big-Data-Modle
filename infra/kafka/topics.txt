@@ -1,0 +1,6 @@
+factory.telemetry.raw
+factory.telemetry.cleaned
+factory.telemetry.invalid
+factory.features.windowed
+factory.predictions.created
+factory.warnings.created

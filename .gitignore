@@ -1,0 +1,32 @@
+# Environment
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Node / frontend
+node_modules/
+.vite/
+dist/
+build/
+.npm-cache/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# Runtime artifacts
+backend/artifacts/
+artifacts/
+
+# OS / editor
+.DS_Store
+*.log

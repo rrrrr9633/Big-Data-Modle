@@ -1,0 +1,159 @@
+import asyncio
+from datetime import UTC, datetime
+from types import SimpleNamespace
+
+from app.api.v1 import ingestion
+from app.ingestion.ai4i import transform_ai4i_row
+
+
+def test_transform_ai4i_row_maps_machine_to_device_and_sensor_readings() -> None:
+    row = {
+        "UDI": "1",
+        "Product ID": "M14860",
+        "Type": "M",
+        "Air temperature [K]": "298.1",
+        "Process temperature [K]": "308.6",
+        "Rotational speed [rpm]": "1551",
+        "Torque [Nm]": "42.8",
+        "Tool wear [min]": "0",
+        "Machine failure": "0",
+    }
+
+    imported = transform_ai4i_row(row, recorded_at=datetime(2026, 1, 1, tzinfo=UTC))
+
+    assert imported.device_code == "M14860"
+    assert imported.device_name == "AI4I-M14860"
+    assert imported.device_type == "M"
+    assert imported.failed is False
+    assert [(item.sensor_code, item.value, item.unit) for item in imported.readings] == [
+        ("air_temperature", 298.1, "K"),
+        ("process_temperature", 308.6, "K"),
+        ("rotational_speed", 1551.0, "rpm"),
+        ("torque", 42.8, "Nm"),
+        ("tool_wear", 0.0, "min"),
+    ]
+
+
+class FakeUploadFile:
+    filename = "ai4i.csv"
+
+    async def read(self) -> bytes:
+        return b"".join(
+            [
+                b"UDI,Product ID,Type,Air temperature [K],Process temperature [K],",
+                b"Rotational speed [rpm],Torque [Nm],Tool wear [min],Machine failure\n",
+                b"1,M14860,M,298.1,308.6,1551,42.8,0,0\n",
+            ]
+        )
+
+
+class FakeUploadFileWithTwoRows:
+    filename = "ai4i.csv"
+
+    async def read(self) -> bytes:
+        return b"".join(
+            [
+                b"UDI,Product ID,Type,Air temperature [K],Process temperature [K],",
+                b"Rotational speed [rpm],Torque [Nm],Tool wear [min],Machine failure\n",
+                b"1,M14860,M,298.1,308.6,1551,42.8,0,0\n",
+                b"2,H29424,H,303.9,313.4,1168,68.5,230,1\n",
+            ]
+        )
+
+
+def test_ai4i_import_trains_without_replaying_demo_data_by_default(monkeypatch) -> None:
+    calls: list[str] = []
+    suite = SimpleNamespace(
+        metrics=[
+            SimpleNamespace(
+                model_name="lightgbm-fault-classifier",
+                model_type="classification",
+                version="1.0.0",
+                metric_name="accuracy",
+                metric_value=0.9,
+            )
+        ]
+    )
+    db = SimpleNamespace(commit=lambda: calls.append("commit"))
+
+    monkeypatch.setattr(
+        ingestion,
+        "ensure_prediction_model_schema",
+        lambda _db: calls.append("schema"),
+    )
+    monkeypatch.setattr(ingestion, "create_import_batch", lambda *_args: 12)
+    monkeypatch.setattr(
+        ingestion,
+        "ensure_baseline_model",
+        lambda _db: calls.append("baseline"),
+    )
+    monkeypatch.setattr(
+        ingestion,
+        "train_ai4i_model_suite",
+        lambda rows: calls.append(f"train:{len(rows)}") or suite,
+    )
+    monkeypatch.setattr(
+        ingestion,
+        "upsert_model_metric",
+        lambda *_args, **_kwargs: calls.append("metric"),
+    )
+    monkeypatch.setattr(ingestion, "save_active_model_suite", lambda _suite: calls.append("save"))
+
+    response = asyncio.run(ingestion.import_ai4i_csv(FakeUploadFile(), db))
+
+    assert response["mode"] == "train_only"
+    assert response["trained_rows"] == 1
+    assert response["replay_enabled"] is False
+    assert response["prediction_count"] == 0
+    assert calls == ["schema", "baseline", "train:1", "metric", "save", "commit"]
+
+
+def test_ai4i_import_can_replay_demo_data_when_enabled(monkeypatch) -> None:
+    calls: list[object] = []
+    suite = SimpleNamespace(metrics=[])
+    db = SimpleNamespace(commit=lambda: calls.append("commit"))
+
+    def fake_predict_ai4i_feature_row(*, device_id, feature_values, suite, forced_failure):
+        calls.append((device_id, feature_values["Torque [Nm]"], forced_failure))
+        return SimpleNamespace(
+            device_id=device_id,
+            failure_probability=0.2 if feature_values["Torque [Nm]"] < 50 else 0.91,
+            health_score=86.0 if feature_values["Torque [Nm]"] < 50 else 30.0,
+            risk_level="low" if feature_values["Torque [Nm]"] < 50 else "critical",
+            anomaly_score=0.1 if feature_values["Torque [Nm]"] < 50 else 0.88,
+            anomaly_reasons=["torque"] if feature_values["Torque [Nm]"] >= 50 else [],
+            trend_factor=0.0,
+            quality_score=1.0,
+            rul_hours=120.0 if feature_values["Torque [Nm]"] < 50 else 2.0,
+        )
+
+    monkeypatch.setattr(ingestion, "ensure_prediction_model_schema", lambda _db: None)
+    monkeypatch.setattr(ingestion, "create_import_batch", lambda *_args: 12)
+    monkeypatch.setattr(ingestion, "ensure_baseline_model", lambda _db: None)
+    monkeypatch.setattr(ingestion, "train_ai4i_model_suite", lambda _rows: suite)
+    monkeypatch.setattr(ingestion, "save_active_model_suite", lambda _suite: None)
+    monkeypatch.setattr(ingestion, "upsert_device", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(ingestion, "insert_sensor_reading", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(ingestion, "insert_feature_window", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(ingestion, "insert_prediction", lambda *_args, **_kwargs: 21)
+    monkeypatch.setattr(ingestion, "insert_prediction_explanations", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        ingestion,
+        "insert_warning",
+        lambda *_args, **_kwargs: calls.append("warning"),
+    )
+    monkeypatch.setattr(ingestion, "predict_ai4i_feature_row", fake_predict_ai4i_feature_row)
+    monkeypatch.setattr(ingestion, "explain_ai4i_feature_row", lambda *_args, **_kwargs: [])
+
+    response = asyncio.run(
+        ingestion.import_ai4i_csv(FakeUploadFileWithTwoRows(), db, replay_demo_data=True)
+    )
+
+    assert response["mode"] == "train_and_replay"
+    assert response["replay_enabled"] is True
+    assert response["prediction_count"] == 2
+    assert response["warning_count"] == 1
+    assert ("M14860", 42.8, False) in calls
+    assert ("H29424", 68.5, True) in calls
+    assert "warning" in calls
+    assert calls[-1] == "commit"
