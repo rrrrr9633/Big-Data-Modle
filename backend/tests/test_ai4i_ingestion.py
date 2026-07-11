@@ -101,6 +101,11 @@ def test_ai4i_import_trains_without_replaying_demo_data_by_default(monkeypatch) 
         "upsert_model_metric",
         lambda *_args, **_kwargs: calls.append("metric"),
     )
+    monkeypatch.setattr(
+        ingestion,
+        "replace_model_feature_dependencies",
+        lambda *_args, **_kwargs: calls.append("dependencies"),
+    )
     monkeypatch.setattr(ingestion, "save_active_model_suite", lambda _suite: calls.append("save"))
     monkeypatch.setattr(ingestion, "insert_audit_log", lambda *_args, **_kwargs: None)
 
@@ -109,8 +114,17 @@ def test_ai4i_import_trains_without_replaying_demo_data_by_default(monkeypatch) 
     assert response["mode"] == "train_only"
     assert response["trained_rows"] == 1
     assert response["replay_enabled"] is False
+    assert "dependencies" in calls
     assert response["prediction_count"] == 0
-    assert calls == ["schema", "baseline", "train:1", "metric", "save", "commit"]
+    assert calls == [
+        "schema",
+        "baseline",
+        "train:1",
+        "metric",
+        "dependencies",
+        "save",
+        "commit",
+    ]
 
 
 def test_ai4i_import_can_replay_demo_data_when_enabled(monkeypatch) -> None:

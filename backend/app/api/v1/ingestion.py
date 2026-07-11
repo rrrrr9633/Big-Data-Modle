@@ -12,7 +12,7 @@ from app.models.model_suite import (
     predict_ai4i_feature_row,
     train_ai4i_model_suite,
 )
-from app.models.registry import save_active_model_suite
+from app.models.registry import model_feature_dependencies, save_active_model_suite
 from app.repositories.maintenance_repository import (
     create_import_batch,
     ensure_baseline_model,
@@ -23,6 +23,7 @@ from app.repositories.maintenance_repository import (
     insert_prediction_explanations,
     insert_sensor_reading,
     insert_warning,
+    replace_model_feature_dependencies,
     upsert_device,
     upsert_model_metric,
 )
@@ -70,6 +71,13 @@ async def import_ai4i_csv(
             version=metric.version,
             metric_name=metric.metric_name,
             metric_value=metric.metric_value,
+        )
+    for dependency in model_feature_dependencies(model_suite):
+        replace_model_feature_dependencies(
+            db,
+            model_name=str(dependency["model_name"]),
+            version=str(dependency["version"]),
+            features=list(dependency["features"]),
         )
 
     save_active_model_suite(model_suite)

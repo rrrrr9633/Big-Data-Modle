@@ -781,7 +781,12 @@ type SystemData = {
   runtimeDiagnostics?: RuntimeDiagnostics;
   ingressCatalog?: IngressCatalog;
   qualitySummary?: QualitySummary;
+  simulation?: SimulationState;
 };
+
+type SimulationReading = { value?: number; quality?: number; status?: string };
+type SimulationDevice = { device_code?: string; mode?: string; readings?: Record<string, SimulationReading> };
+type SimulationState = { source?: string; running?: boolean; cycle?: number; mode?: string; devices?: SimulationDevice[] };
 
 type AuthUser = {
   username?: string;
@@ -799,7 +804,7 @@ type AuditLogRecord = {
   created_at?: string;
 };
 
-type ViewKey = 'ops' | 'realtime' | 'warnings' | 'predictions' | 'devices' | 'models';
+type ViewKey = 'ops' | 'simulation' | 'realtime' | 'warnings' | 'predictions' | 'devices' | 'models';
 
 type ApiState = {
   loading: boolean;
@@ -812,6 +817,7 @@ type ApiState = {
 
 const viewLabels: Record<ViewKey, string> = {
   ops: '实时运行工作台',
+  simulation: '现场仿真场景',
   realtime: '设备实时监测',
   warnings: '预警处置中心',
   predictions: '预测与健康评估',
@@ -821,6 +827,7 @@ const viewLabels: Record<ViewKey, string> = {
 
 const menuItems: Array<{ key: ViewKey; label: string; desc: string }> = [
   { key: 'ops', label: '实时运行工作台', desc: '全局态势 / 高风险队列' },
+  { key: 'simulation', label: '现场仿真场景', desc: '连续工况 / 质量故障演练' },
   { key: 'realtime', label: '设备实时监测', desc: 'Redis 快照 / TSDB 点位' },
   { key: 'warnings', label: '预警处置中心', desc: '确认 / 处理 / 关闭' },
   { key: 'predictions', label: '预测与健康评估', desc: '故障概率 / 健康评分' },
@@ -873,7 +880,7 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
   const loadData = async (mode: 'initial' | 'refresh' = 'refresh') => {
     setApiState((current) => ({ ...current, loading: mode === 'initial', refreshing: mode === 'refresh', error: null }));
     try {
-      const [health, realtime, warnings, predictions, devices, activeModel, models, ingressCatalog, qualitySummary] = await Promise.allSettled([
+      const [health, realtime, warnings, predictions, devices, activeModel, models, ingressCatalog, qualitySummary, simulation] = await Promise.allSettled([
         request<{ status?: string; service?: string }>('/api/v1/health'),
         request<RealtimeOverview>('/api/v1/realtime/overview'),
         request<WarningRecord[]>('/api/v1/warnings?limit=100'),
@@ -883,6 +890,7 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
         request<ModelMetric[]>('/api/v1/models'),
         request<IngressCatalog>('/api/v1/ingress/catalog'),
         request<QualitySummary>('/api/v1/quality/summary'),
+        request<SimulationState>('/api/v1/simulation/state'),
       ]);
 
       setData((current) => ({
@@ -895,6 +903,7 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
         models: settledValue(models) ?? current.models,
         ingressCatalog: settledValue(ingressCatalog) ?? current.ingressCatalog,
         qualitySummary: settledValue(qualitySummary) ?? current.qualitySummary,
+        simulation: settledValue(simulation) ?? current.simulation,
       }));
 
       const endpointResults = [
@@ -907,6 +916,7 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
         { label: '模型指标', path: '/api/v1/models', result: models },
         { label: '接入目录', path: '/api/v1/ingress/catalog', result: ingressCatalog },
         { label: '点位质量与异常追踪', path: '/api/v1/quality/summary', result: qualitySummary },
+        { label: '现场仿真场景', path: '/api/v1/simulation/state', result: simulation },
       ];
       const failedEndpoints = endpointResults
         .filter((item) => item.result.status === 'rejected')
@@ -1120,6 +1130,24 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
     }
   };
 
+  const controlSimulation = async (action: 'start' | 'tick' | 'stop', mode = 'degrading') => {
+    setApiState((current) => ({ ...current, mutating: true, error: null }));
+    try {
+      const response = await fetch(apiUrl(`/api/v1/simulation/${action}`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeader },
+        body: action === 'start' ? JSON.stringify({ device_count: 6, mode }) : undefined,
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const simulation = await response.json() as SimulationState;
+      setData((current) => ({ ...current, simulation }));
+      setActionMessage(`仿真场景${action === 'start' ? '已启动' : action === 'tick' ? '已推进一个采集周期' : '已停止'}。`);
+      setApiState((current) => ({ ...current, mutating: false, updatedAt: new Date() }));
+    } catch (error) {
+      setApiState((current) => ({ ...current, mutating: false, error: error instanceof Error ? error.message : '仿真控制失败' }));
+    }
+  };
+
   const saveDevice = async (payload: DeviceCatalogPayload) => {
     setApiState((current) => ({ ...current, mutating: true, error: null }));
     setActionMessage(`正在保存设备台账：${payload.device_code}`);
@@ -1239,6 +1267,7 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
           {criticalWarnings.length > 0 && <CriticalAlertBanner warnings={criticalWarnings} onOpen={() => setActiveView('warnings')} />}
 
           {activeView === 'ops' && <RealtimeOpsView summary={summary} devices={devices} warnings={warnings} predictions={predictions} apiState={apiState} diagnostics={data.runtimeDiagnostics} qualitySummary={data.qualitySummary} auditLogs={auditLogs} onOpenDevice={(code) => { setSelectedDevice(code); setActiveView('realtime'); }} />}
+          {activeView === 'simulation' && <SimulationView simulation={data.simulation} busy={apiState.mutating} onControl={controlSimulation} />}
           {activeView === 'realtime' && <RealtimeDevicesView devices={devices} selectedDevice={selectedRealtimeDevice} onSelect={setSelectedDevice} />}
           {activeView === 'warnings' && <WarningCenterView warnings={warnings} operator={operator} note={note} actionMessage={actionMessage} onOperatorChange={setOperator} onNoteChange={setNote} onTransition={transitionWarning} />}
           {activeView === 'predictions' && <PredictionsView predictions={predictions} activeModel={data.activeModel} />}
@@ -1322,6 +1351,48 @@ function RealtimeOpsView({ summary, devices, warnings, predictions, apiState, di
             <p>{apiState.error ?? '当前未检测到接口错误。Kafka / Redis / TSDB 如未启动，实时数据可能为空。'}</p>
           </div>
         </Panel>
+      </section>
+    </div>
+  );
+}
+
+function SimulationView({ simulation, busy, onControl }: { simulation?: SimulationState; busy: boolean; onControl: (action: 'start' | 'tick' | 'stop', mode?: string) => void }) {
+  const devices = simulation?.devices ?? [];
+  return (
+    <div className="console-page simulation-page">
+      <section className="simulation-header">
+        <div>
+          <span className="simulation-source">本地仿真源</span>
+          <h1>现场工况演练</h1>
+          <p>此页面运行连续 CNC 工况与传感器故障场景，不代表真实现场设备。启动后可逐周期观察点位、质量状态和劣化趋势。</p>
+        </div>
+        <div className="simulation-actions">
+          <button disabled={busy} onClick={() => onControl('start', 'degrading')}>启动劣化场景</button>
+          <button disabled={busy || !simulation?.running} onClick={() => onControl('tick')}>推进一个周期</button>
+          <button disabled={busy || !simulation?.running} onClick={() => onControl('stop')}>停止场景</button>
+        </div>
+      </section>
+      <section className="metric-row">
+        <MetricBox label="运行状态" value={simulation?.running ? '运行中' : '未启动'} note="独立仿真运行时" tone={simulation?.running ? 'dark' : 'danger'} />
+        <MetricBox label="采集周期" value={simulation?.cycle ?? 0} note="每次推进代表一轮采集" tone="dark" />
+        <MetricBox label="设备数量" value={devices.length} note="SIM-CNC 虚拟设备" tone="dark" />
+        <MetricBox label="当前场景" value={simulation?.mode ?? '未选择'} note="工况和质量故障模型" tone="dark" />
+      </section>
+      <section className="simulation-device-grid">
+        {devices.length === 0 && <div className="simulation-empty">启动场景后将在这里显示连续传感器工况。</div>}
+        {devices.map((device) => {
+          const readings = device.readings ?? {};
+          return <article className="simulation-device" key={device.device_code}>
+            <header><strong>{device.device_code}</strong><span>{device.mode}</span></header>
+            <dl>
+              <div><dt>主轴温度</dt><dd>{formatValue(readings.spindle_temperature?.value)} C</dd></div>
+              <div><dt>主轴负载</dt><dd>{formatValue(readings.spindle_load?.value)} %</dd></div>
+              <div><dt>振动 RMS</dt><dd>{formatValue(readings.vibration_rms?.value)}</dd></div>
+              <div><dt>刀具磨损</dt><dd>{formatValue(readings.tool_wear?.value)} min</dd></div>
+            </dl>
+            <footer>数据质量 {formatPercent(readings.spindle_temperature?.quality)} · {readings.spindle_temperature?.status ?? '等待采集'}</footer>
+          </article>;
+        })}
       </section>
     </div>
   );

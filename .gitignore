@@ -27,6 +27,7 @@ vite.config.d.ts
 # Runtime artifacts
 backend/artifacts/
 artifacts/
+backend/.edge-spool/
 
 # OS / editor
 .DS_Store

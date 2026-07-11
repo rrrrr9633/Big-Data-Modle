@@ -376,6 +376,78 @@ def fetch_model_versions(db: Session) -> list[dict[str, Any]]:
     return _rows(result)
 
 
+def fetch_sensor_point(
+    db: Session,
+    *,
+    device_code: str,
+    sensor_code: str,
+) -> dict[str, Any] | None:
+    result = db.execute(
+        text(
+            """
+            SELECT sensor_code, device_code, protocol, source_address,
+                   protocol_options, feature_name
+            FROM sensor_points
+            WHERE device_code = :device_code AND sensor_code = :sensor_code
+            """
+        ),
+        {"device_code": device_code, "sensor_code": sensor_code},
+    )
+    row = result.mappings().first()
+    return dict(row) if row else None
+
+
+def fetch_active_model_feature_dependencies(db: Session) -> list[dict[str, Any]]:
+    result = db.execute(
+        text(
+            """
+            SELECT model_name, version, feature_name
+            FROM model_feature_dependencies
+            WHERE status = 'active'
+            ORDER BY model_name, version, feature_name
+            """
+        )
+    )
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for row in _rows(result):
+        key = (str(row["model_name"]), str(row["version"]))
+        grouped.setdefault(key, []).append(str(row["feature_name"]))
+    return [
+        {"model_name": name, "version": version, "features": features}
+        for (name, version), features in grouped.items()
+    ]
+
+
+def replace_model_feature_dependencies(
+    db: Session,
+    *,
+    model_name: str,
+    version: str,
+    features: list[str],
+) -> None:
+    db.execute(
+        text(
+            """
+            DELETE FROM model_feature_dependencies
+            WHERE model_name = :model_name AND version = :version
+            """
+        ),
+        {"model_name": model_name, "version": version},
+    )
+    db.execute(
+        text(
+            """
+            INSERT INTO model_feature_dependencies (model_name, version, feature_name, status)
+            VALUES (:model_name, :version, :feature_name, 'active')
+            """
+        ),
+        [
+            {"model_name": model_name, "version": version, "feature_name": feature}
+            for feature in features
+        ],
+    )
+
+
 def create_import_batch(db: Session, source_name: str, row_count: int) -> int:
     result = db.execute(
         text(
@@ -1006,6 +1078,7 @@ def reset_training_records(db: Session) -> dict[str, int]:
         "sensor_points",
         "devices",
         "data_import_batches",
+        "model_feature_dependencies",
         "model_versions",
     ]
     deleted: dict[str, int] = {}
@@ -1184,6 +1257,18 @@ def ensure_prediction_model_schema(db: Session) -> None:
           INDEX idx_master_data_version_resource_time (device_code, sensor_code, created_at),
           CONSTRAINT fk_master_data_version_change
             FOREIGN KEY (change_request_id) REFERENCES master_data_change_requests(id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS model_feature_dependencies (
+          id BIGINT PRIMARY KEY AUTO_INCREMENT,
+          model_name VARCHAR(128) NOT NULL,
+          version VARCHAR(64) NOT NULL,
+          feature_name VARCHAR(128) NOT NULL,
+          status VARCHAR(32) NOT NULL DEFAULT 'active',
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY uk_model_feature_dependency (model_name, version, feature_name),
+          INDEX idx_model_feature_active (feature_name, status)
         )
         """,
         """

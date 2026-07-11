@@ -190,6 +190,9 @@ def test_approve_master_data_change_request_applies_payload(monkeypatch) -> None
         "fetch_master_data_change_request",
         lambda _db, _id: change_request,
     )
+    monkeypatch.setattr(devices, "fetch_sensor_point", lambda _db, **_kwargs: {})
+    monkeypatch.setattr(devices, "fetch_active_model_feature_dependencies", lambda _db: [])
+    monkeypatch.setattr(devices, "fetch_devices", lambda _db: [])
     monkeypatch.setattr(
         devices, "upsert_sensor_point", lambda _db, **payload: calls.append(("upsert", payload))
     )
@@ -235,3 +238,58 @@ def test_approve_master_data_change_request_applies_payload(monkeypatch) -> None
     )
     assert calls[1][0] == "version"
     assert calls[2][0] == "decision"
+
+
+def test_approve_feature_rename_blocks_active_model_dependency(monkeypatch) -> None:
+    change_request = {
+        "id": 43,
+        "status": "pending",
+        "entity_type": "sensor_point",
+        "operation": "upsert",
+        "device_code": "CNC-001",
+        "sensor_code": "spindle_temperature",
+        "payload": {"feature_name": "spindle_temperature_mean_v2"},
+        "impact": {},
+    }
+    calls: list[str] = []
+
+    monkeypatch.setattr(devices, "ensure_prediction_model_schema", lambda _db: None)
+    monkeypatch.setattr(
+        devices,
+        "fetch_master_data_change_request",
+        lambda _db, _id: change_request,
+    )
+    monkeypatch.setattr(
+        devices,
+        "fetch_sensor_point",
+        lambda _db, **_kwargs: {"feature_name": "spindle_temperature_mean"},
+    )
+    monkeypatch.setattr(
+        devices,
+        "fetch_active_model_feature_dependencies",
+        lambda _db: [
+            {
+                "model_name": "fault-classifier",
+                "version": "2026.07.1",
+                "features": ["spindle_temperature_mean"],
+            }
+        ],
+    )
+    monkeypatch.setattr(devices, "fetch_devices", lambda _db: [])
+    monkeypatch.setattr(
+        devices,
+        "upsert_sensor_point",
+        lambda *_args, **_kwargs: calls.append("upsert"),
+    )
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        response = TestClient(app).post(
+            "/api/v1/devices/change-requests/43/decision",
+            json={"decision": "approve"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 409
+    assert "fault-classifier@2026.07.1" in response.json()["detail"]
+    assert calls == []

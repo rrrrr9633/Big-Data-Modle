@@ -12,6 +12,7 @@ from app.api.v1 import (
     quality,
     realtime,
     runtime,
+    simulation,
     telemetry,
     warnings,
 )
@@ -30,3 +31,4 @@ api_router.include_router(ingress.router, prefix="/ingress", tags=["ingress"])
 api_router.include_router(quality.router, prefix="/quality", tags=["quality"])
 api_router.include_router(telemetry.router, prefix="/telemetry", tags=["telemetry"])
 api_router.include_router(runtime.router, prefix="/runtime", tags=["runtime"])
+api_router.include_router(simulation.router, prefix="/simulation", tags=["simulation"])

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from app.edge.adapters import get_adapter
-from app.edge.contracts import EdgeAdapterConfig, PublishMode, PublishResult
+from app.edge.contracts import EdgeAdapterConfig, PublishMode, PublishResult, RawPointValue
 from app.edge.mapper import map_raw_value_to_event
 from app.edge.publisher import publish_events
 from app.edge.simulation import simulated_value
@@ -28,7 +30,17 @@ def collect_live_once(config: EdgeAdapterConfig) -> list[TelemetryEvent]:
         if not binding.enabled:
             continue
         adapter = get_adapter(binding.protocol)
-        raw_value = adapter.read(binding)
+        try:
+            raw_value = adapter.read(binding)
+        except Exception as exc:
+            raw_value = RawPointValue(
+                binding=binding,
+                value=0.0,
+                quality=0.0,
+                acquired_at=datetime.now(UTC),
+                raw_status="read_failed",
+                raw_payload={"protocol": binding.protocol, "error": str(exc)},
+            )
         events.append(map_raw_value_to_event(raw_value, config.gateway))
     return events
 

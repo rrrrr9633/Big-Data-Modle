@@ -3,12 +3,15 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 from app.core.database import get_db
+from app.governance.dependencies import assess_sensor_point_change
 from app.repositories.maintenance_repository import (
     disable_sensor_point,
     ensure_prediction_model_schema,
+    fetch_active_model_feature_dependencies,
     fetch_devices,
     fetch_master_data_change_request,
     fetch_master_data_change_requests,
+    fetch_sensor_point,
     insert_audit_log,
     insert_master_data_change_request,
     insert_master_data_version,
@@ -131,6 +134,9 @@ def decide_master_data_change_request(
     version_id: int | None = None
     status = "rejected"
     if payload.decision == "approve":
+        dependency_impact = _approval_dependency_impact(db, change_request)
+        if not dependency_impact.publish_allowed:
+            raise HTTPException(status_code=409, detail="；".join(dependency_impact.blockers))
         _apply_master_data_change(db, change_request)
         version_id = insert_master_data_version(
             db,
@@ -287,6 +293,49 @@ def _build_master_data_change_impact(payload: MasterDataChangeRequestIn) -> dict
         "risk_items": risk_items or ["低风险主数据变更"],
         "review_items": review_items,
     }
+
+
+def _approval_dependency_impact(db: Session, change_request: dict[str, Any]):
+    if (
+        change_request.get("entity_type") != "sensor_point"
+        or change_request.get("operation") != "upsert"
+        or not change_request.get("sensor_code")
+    ):
+        return assess_sensor_point_change(
+            device_code=str(change_request["device_code"]),
+            sensor_code="",
+            current_point={},
+            proposed_point={},
+            active_models=[],
+            gateway_configs=[],
+        )
+
+    device_code = str(change_request["device_code"])
+    sensor_code = str(change_request["sensor_code"])
+    current_point = fetch_sensor_point(
+        db,
+        device_code=device_code,
+        sensor_code=sensor_code,
+    ) or {}
+    gateways = [
+        {
+            "gateway_id": f"gateway-{device.get('device_code', '').lower()}",
+            "config_version": "current",
+            "device_code": device.get("device_code"),
+            "point_code": point.get("sensor_code"),
+            "feature_name": point.get("feature_name"),
+        }
+        for device in fetch_devices(db)
+        for point in device.get("sensor_points") or []
+    ]
+    return assess_sensor_point_change(
+        device_code=device_code,
+        sensor_code=sensor_code,
+        current_point=current_point,
+        proposed_point=change_request.get("payload") or {},
+        active_models=fetch_active_model_feature_dependencies(db),
+        gateway_configs=gateways,
+    )
 
 
 def _apply_master_data_change(db: Session, change_request: dict[str, Any]) -> None:

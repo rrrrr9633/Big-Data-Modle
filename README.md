@@ -29,6 +29,28 @@ uvicorn app.main:app --reload
 
 健康检查：`http://127.0.0.1:8000/api/v1/health`
 
+## 边缘网关与工业模拟
+
+边缘运行器使用 SQLite 本地出站队列：遥测事件先持久化，发布成功后才确认删除。
+现场部署必须将 `EDGE_SPOOL_PATH` 指向边缘主机的持久化磁盘，而不是容器临时目录：
+
+```bash
+cd backend
+export EDGE_SPOOL_PATH=/var/lib/pdm-edge/gateway-cnc-001.sqlite
+./.venv/bin/python -m app.edge.runner /etc/pdm-edge/gateway-cnc-001.json
+```
+
+其中 `gateway-cnc-001.json` 可由 `/api/v1/ingress/edge-configs` 导出。网络恢复后，运行器按原始采集顺序补发未确认事件；重复的 `event_id` 由平台既有幂等键拦截。
+
+本地设备流量模拟器可基于 AI4I 样本生成正常、劣化和故障设备：
+
+```bash
+cd backend
+./.venv/bin/python scripts/simulate_devices.py --devices 20 --cycles 10 --dry-run
+```
+
+`IndustrialDeviceSimulator` 还提供确定性的 CNC 工况曲线，包含主轴温度、负载、振动、刀具磨损、传感器卡死和传感器漂移，用于边缘链路与告警演练。真实 CNC 协议需注册已授权的厂商驱动；未安装 FANUC、SINUMERIK、Mitsubishi、Haas 或华中数控 SDK 时会明确返回 `driver_unavailable`。
+
 ## 启动前端
 
 ```bash

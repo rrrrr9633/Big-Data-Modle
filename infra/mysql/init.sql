@@ -197,3 +197,14 @@ CREATE TABLE IF NOT EXISTS model_versions (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uk_model_version_metric (model_name, version, metric_name)
 );
+
+CREATE TABLE IF NOT EXISTS model_feature_dependencies (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  model_name VARCHAR(128) NOT NULL,
+  version VARCHAR(64) NOT NULL,
+  feature_name VARCHAR(128) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'active',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_model_feature_dependency (model_name, version, feature_name),
+  INDEX idx_model_feature_active (feature_name, status)
+);

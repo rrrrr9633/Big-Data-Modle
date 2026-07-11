@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.models.model_suite import Ai4iModelSuite
+from app.models.model_suite import AI4I_FEATURE_COLUMNS, Ai4iModelSuite
 
 MODEL_ARTIFACT_DIR = Path(__file__).resolve().parents[2] / "artifacts" / "models"
 ACTIVE_MODEL_PATH = MODEL_ARTIFACT_DIR / "active_ai4i_model_suite.pkl"
@@ -68,6 +68,18 @@ def delete_active_model_artifacts() -> dict[str, bool]:
     return deleted
 
 
+def model_feature_dependencies(suite: Ai4iModelSuite) -> list[dict[str, object]]:
+    models = list(dict.fromkeys((metric.model_name, metric.version) for metric in suite.metrics))
+    return [
+        {
+            "model_name": model_name,
+            "version": version,
+            "features": list(AI4I_FEATURE_COLUMNS),
+        }
+        for model_name, version in models
+    ]
+
+
 def _build_manifest(suite: Any) -> dict[str, Any]:
     metrics = getattr(suite, "metrics", [])
     model_names = list(dict.fromkeys(str(metric.model_name) for metric in metrics))
@@ -83,6 +95,7 @@ def _build_manifest(suite: Any) -> dict[str, Any]:
         "manifest_path": str(ACTIVE_MODEL_MANIFEST_PATH),
         "model_names": model_names,
         "model_types": model_types,
+        "feature_dependencies": model_feature_dependencies(suite),
         "pipeline": [
             "设备数据接入层",
             "数据标准化",
