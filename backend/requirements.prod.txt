@@ -1,0 +1,18 @@
+fastapi>=0.116.0
+uvicorn[standard]>=0.35.0
+pydantic-settings>=2.10.0
+sqlalchemy>=2.0.40
+pymysql>=1.1.1
+redis>=6.2.0
+# Ubuntu 22.04 ships Python 3.10; NumPy 2.3+ requires Python 3.11.
+numpy>=2.2.0,<2.3.0
+scikit-learn>=1.7.0
+lightgbm>=4.6.0
+shap>=0.48.0
+kafka-python>=2.2.0
+paho-mqtt>=2.1.0
+pymodbus>=3.8.0
+asyncua>=1.1.5
+python-snap7>=2.0.2
+python-multipart>=0.0.20
+psycopg[binary]>=3.2.0

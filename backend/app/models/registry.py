@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import pickle
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -90,7 +90,7 @@ def _build_manifest(suite: Any) -> dict[str, Any]:
     }
     return {
         "available": True,
-        "saved_at": datetime.now(UTC).isoformat(),
+        "saved_at": datetime.now(timezone.utc).isoformat(),
         "artifact_path": str(ACTIVE_MODEL_PATH),
         "manifest_path": str(ACTIVE_MODEL_MANIFEST_PATH),
         "model_names": model_names,

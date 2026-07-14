@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -16,7 +16,7 @@ def publish_payload_to_mqtt(
     gateway_id: str = "frontend-simulator",
 ) -> dict[str, object]:
     payload = raw if isinstance(raw, TelemetryPayloadIn) else parse_telemetry_payload(raw)
-    recorded_at = payload.recorded_at or datetime.now(UTC)
+    recorded_at = payload.recorded_at or datetime.now(timezone.utc)
     topic = build_device_telemetry_topic(payload.device_code)
     events = [
         TelemetryEvent(

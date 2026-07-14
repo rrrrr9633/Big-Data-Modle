@@ -15,6 +15,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        from app.api.v1.simulation import runtime as device_stream_runtime
+
+        device_stream_runtime.stop()
         stop_stream_runtime(consumers)
 
 

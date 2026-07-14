@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import random
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from app.edge.contracts import EdgePointBinding, RawPointValue
 
@@ -83,7 +83,7 @@ def simulated_value(binding: EdgePointBinding, *, salt: str) -> RawPointValue:
         binding=binding,
         value=value,
         quality=1.0 if binding.enabled else 0.0,
-        acquired_at=datetime.now(UTC),
+        acquired_at=datetime.now(timezone.utc),
         raw_status="simulated",
         raw_payload={
             "protocol": binding.protocol,

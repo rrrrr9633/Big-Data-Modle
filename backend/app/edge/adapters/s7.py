@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.edge.adapters.parsing import decode_s7_value, parse_s7_address
@@ -28,7 +28,7 @@ class S7Adapter:
                 binding=binding,
                 value=decode_s7_value(payload, address.value_type),
                 quality=1.0,
-                acquired_at=datetime.now(UTC),
+                acquired_at=datetime.now(timezone.utc),
                 raw_status="good",
                 raw_payload={"protocol": self.protocol, "address": binding.source_address},
             )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from app.edge.contracts import EdgeGatewayConfig, RawPointValue
@@ -15,7 +15,7 @@ def map_raw_value_to_event(raw: RawPointValue, gateway: EdgeGatewayConfig) -> Te
         value=raw.value,
         unit=raw.binding.unit,
         quality=raw.quality,
-        ts=raw.acquired_at or datetime.now(UTC),
+        ts=raw.acquired_at or datetime.now(timezone.utc),
         gateway_id=gateway.gateway_id,
         source_topic=gateway.mqtt_topic,
     )

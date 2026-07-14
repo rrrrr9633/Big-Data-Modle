@@ -784,9 +784,18 @@ type SystemData = {
   simulation?: SimulationState;
 };
 
-type SimulationReading = { value?: number; quality?: number; status?: string };
-type SimulationDevice = { device_code?: string; mode?: string; readings?: Record<string, SimulationReading> };
-type SimulationState = { source?: string; running?: boolean; cycle?: number; mode?: string; devices?: SimulationDevice[] };
+type SimulationState = {
+  running?: boolean;
+  cycle?: number;
+  mode?: string;
+  interval_seconds?: number;
+  gateway_id?: string;
+  devices?: string[];
+  accepted_events?: number;
+  failed_cycles?: number;
+  last_published_at?: string | null;
+  last_error?: string | null;
+};
 
 type AuthUser = {
   username?: string;
@@ -1267,7 +1276,7 @@ function SystemConsole({ onBack }: { onBack: () => void }) {
           {criticalWarnings.length > 0 && <CriticalAlertBanner warnings={criticalWarnings} onOpen={() => setActiveView('warnings')} />}
 
           {activeView === 'ops' && <RealtimeOpsView summary={summary} devices={devices} warnings={warnings} predictions={predictions} apiState={apiState} diagnostics={data.runtimeDiagnostics} qualitySummary={data.qualitySummary} auditLogs={auditLogs} onOpenDevice={(code) => { setSelectedDevice(code); setActiveView('realtime'); }} />}
-          {activeView === 'simulation' && <SimulationView simulation={data.simulation} busy={apiState.mutating} onControl={controlSimulation} />}
+          {activeView === 'simulation' && <SimulationView simulation={data.simulation} realtimeDevices={devices} busy={apiState.mutating} onControl={controlSimulation} />}
           {activeView === 'realtime' && <RealtimeDevicesView devices={devices} selectedDevice={selectedRealtimeDevice} onSelect={setSelectedDevice} />}
           {activeView === 'warnings' && <WarningCenterView warnings={warnings} operator={operator} note={note} actionMessage={actionMessage} onOperatorChange={setOperator} onNoteChange={setNote} onTransition={transitionWarning} />}
           {activeView === 'predictions' && <PredictionsView predictions={predictions} activeModel={data.activeModel} />}
@@ -1356,41 +1365,42 @@ function RealtimeOpsView({ summary, devices, warnings, predictions, apiState, di
   );
 }
 
-function SimulationView({ simulation, busy, onControl }: { simulation?: SimulationState; busy: boolean; onControl: (action: 'start' | 'tick' | 'stop', mode?: string) => void }) {
-  const devices = simulation?.devices ?? [];
+function SimulationView({ simulation, realtimeDevices, busy, onControl }: { simulation?: SimulationState; realtimeDevices: RealtimeDevice[]; busy: boolean; onControl: (action: 'start' | 'tick' | 'stop', mode?: string) => void }) {
+  const deviceCodes = simulation?.devices ?? [];
+  const devices = realtimeDevices.filter((device) => device.device_code && deviceCodes.includes(device.device_code));
   return (
     <div className="console-page simulation-page">
       <section className="simulation-header">
         <div>
-          <span className="simulation-source">本地仿真源</span>
+          <span className="simulation-source">设备流接入控制</span>
           <h1>现场工况演练</h1>
-          <p>此页面运行连续 CNC 工况与传感器故障场景，不代表真实现场设备。启动后可逐周期观察点位、质量状态和劣化趋势。</p>
+          <p>启动后，后台进程会登记设备点位并向标准 MQTT 设备 topic 连续发送遥测。页面仅显示已完成接入链路后的实时状态；数据依次经过 MQTT、Kafka、质量校验、TSDB/Redis 与推理服务。</p>
         </div>
         <div className="simulation-actions">
           <button disabled={busy} onClick={() => onControl('start', 'degrading')}>启动劣化场景</button>
-          <button disabled={busy || !simulation?.running} onClick={() => onControl('tick')}>推进一个周期</button>
           <button disabled={busy || !simulation?.running} onClick={() => onControl('stop')}>停止场景</button>
         </div>
       </section>
       <section className="metric-row">
-        <MetricBox label="运行状态" value={simulation?.running ? '运行中' : '未启动'} note="独立仿真运行时" tone={simulation?.running ? 'dark' : 'danger'} />
-        <MetricBox label="采集周期" value={simulation?.cycle ?? 0} note="每次推进代表一轮采集" tone="dark" />
-        <MetricBox label="设备数量" value={devices.length} note="SIM-CNC 虚拟设备" tone="dark" />
-        <MetricBox label="当前场景" value={simulation?.mode ?? '未选择'} note="工况和质量故障模型" tone="dark" />
+        <MetricBox label="流状态" value={simulation?.running ? '发布中' : '未启动'} note={`网关 ${simulation?.gateway_id ?? '-'}`} tone={simulation?.running ? 'dark' : 'danger'} />
+        <MetricBox label="采集周期" value={simulation?.cycle ?? 0} note={`${simulation?.interval_seconds ?? 1}s 连续采集`} tone="dark" />
+        <MetricBox label="已发布点位" value={simulation?.accepted_events ?? 0} note={simulation?.last_error ? '发布失败，查看链路状态' : '已写入 MQTT 接入边界'} tone="dark" />
+        <MetricBox label="链路可见设备" value={devices.length} note={`已登记 ${deviceCodes.length} 台`} tone="dark" />
       </section>
       <section className="simulation-device-grid">
-        {devices.length === 0 && <div className="simulation-empty">启动场景后将在这里显示连续传感器工况。</div>}
+        {simulation?.last_error && <div className="simulation-empty">发布异常：{simulation.last_error}</div>}
+        {deviceCodes.length > 0 && devices.length === 0 && <div className="simulation-empty">设备流已发布，正在等待 MQTT → Kafka → 清洗 → TSDB/Redis 链路回写。</div>}
+        {deviceCodes.length === 0 && <div className="simulation-empty">启动场景后将创建标准设备流并等待链路回写。</div>}
         {devices.map((device) => {
-          const readings = device.readings ?? {};
           return <article className="simulation-device" key={device.device_code}>
-            <header><strong>{device.device_code}</strong><span>{device.mode}</span></header>
+            <header><strong>{device.device_code}</strong><span>{device.online ? 'online' : 'offline'}</span></header>
             <dl>
-              <div><dt>主轴温度</dt><dd>{formatValue(readings.spindle_temperature?.value)} C</dd></div>
-              <div><dt>主轴负载</dt><dd>{formatValue(readings.spindle_load?.value)} %</dd></div>
-              <div><dt>振动 RMS</dt><dd>{formatValue(readings.vibration_rms?.value)}</dd></div>
-              <div><dt>刀具磨损</dt><dd>{formatValue(readings.tool_wear?.value)} min</dd></div>
+              <div><dt>最新点位</dt><dd>{device.point_code ?? '-'}</dd></div>
+              <div><dt>当前值</dt><dd>{formatValue(device.value)} {device.unit ?? ''}</dd></div>
+              <div><dt>数据质量</dt><dd>{formatPercent(device.quality)}</dd></div>
+              <div><dt>预测风险</dt><dd>{device.latest_prediction?.risk_level ?? '等待推理'}</dd></div>
             </dl>
-            <footer>数据质量 {formatPercent(readings.spindle_temperature?.quality)} · {readings.spindle_temperature?.status ?? '等待采集'}</footer>
+            <footer>接收时间 {formatDateTime(device.ts)} · 实时总览回写</footer>
           </article>;
         })}
       </section>

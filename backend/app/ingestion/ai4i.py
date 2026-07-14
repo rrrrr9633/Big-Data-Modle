@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.schemas.timeseries import SensorReading
 
@@ -55,4 +55,4 @@ def transform_ai4i_row(
 
 def _timestamp_from_udi(udi: str | None) -> datetime:
     offset_minutes = max(int(udi or "1") - 1, 0)
-    return datetime(2026, 1, 1, tzinfo=UTC) + timedelta(minutes=offset_minutes)
+    return datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=offset_minutes)

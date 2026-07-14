@@ -1,0 +1,22 @@
+[Unit]
+Description=Industrial PDM FastAPI backend
+After=network.target mysql.service redis-server.service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=pdm
+Group=pdm
+WorkingDirectory=/var/www/Big-Data-Modle/backend
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/var/www/Big-Data-Modle/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

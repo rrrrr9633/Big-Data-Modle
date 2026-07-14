@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Literal
 
-from app.edge.simulation import IndustrialDeviceSimulator, SimulatedReading
+from app.edge.device_stream import DeviceStreamConfig, DeviceStreamSimulator
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -16,76 +15,37 @@ class SimulationStartIn(BaseModel):
     mode: SimulationMode = "degrading"
 
 
-@dataclass
-class ScenarioRuntime:
-    running: bool = False
-    cycle: int = 0
-    mode: SimulationMode = "degrading"
-    devices: dict[str, IndustrialDeviceSimulator] = field(default_factory=dict)
-
-    def start(self, payload: SimulationStartIn) -> None:
-        self.running = True
-        self.cycle = 0
-        self.mode = payload.mode
-        self.devices = {
-            f"SIM-CNC-{index + 1:03d}": IndustrialDeviceSimulator(
-                device_code=f"SIM-CNC-{index + 1:03d}", seed=index + 1, mode=payload.mode
-            )
-            for index in range(payload.device_count)
-        }
-
-    def snapshot(self) -> dict[str, object]:
-        return {
-            "source": "simulation",
-            "running": self.running,
-            "cycle": self.cycle,
-            "mode": self.mode,
-            "devices": [
-                {
-                    "device_code": code,
-                    "mode": simulator.mode,
-                    "readings": _serialize_readings(simulator.next_cycle(cycle=self.cycle)),
-                }
-                for code, simulator in self.devices.items()
-            ],
-        }
+runtime = DeviceStreamSimulator()
 
 
-def _serialize_readings(readings: dict[str, SimulatedReading]) -> dict[str, dict[str, object]]:
-    return {
-        name: {
-            "value": reading.value,
-            "quality": reading.quality,
-            "status": reading.raw_status,
-        }
-        for name, reading in readings.items()
-    }
-
-
-runtime = ScenarioRuntime()
+def _state() -> dict[str, object]:
+    state = runtime.snapshot()
+    return {"running": state.running, "cycle": state.cycle, "mode": state.config.mode, "interval_seconds": state.config.interval_seconds, "gateway_id": state.config.gateway_id, "devices": state.device_codes, "accepted_events": state.accepted_events, "failed_cycles": state.failed_cycles, "last_published_at": state.last_published_at, "last_error": state.last_error}
 
 
 @router.get("/state")
 def get_simulation_state() -> dict[str, object]:
-    return runtime.snapshot()
+    return _state()
 
 
 @router.post("/start")
 def start_simulation(payload: SimulationStartIn) -> dict[str, object]:
-    runtime.start(payload)
-    runtime.cycle = 1
-    return runtime.snapshot()
+    try:
+        runtime.start(DeviceStreamConfig(device_count=payload.device_count, mode=payload.mode))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"设备流启动失败：{exc}") from exc
+    return _state()
 
 
 @router.post("/tick")
 def tick_simulation() -> dict[str, object]:
-    if not runtime.running:
+    if not runtime.snapshot().running:
         raise HTTPException(status_code=409, detail="仿真场景未启动")
-    runtime.cycle += 1
-    return runtime.snapshot()
+    runtime.emit_cycle()
+    return _state()
 
 
 @router.post("/stop")
 def stop_simulation() -> dict[str, object]:
-    runtime.running = False
-    return runtime.snapshot()
+    runtime.stop()
+    return _state()

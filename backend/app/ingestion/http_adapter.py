@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from app.core.config import settings
@@ -15,7 +15,7 @@ def publish_payload_to_raw_topic(
     protocol: str,
 ) -> dict[str, object]:
     payload = raw if isinstance(raw, TelemetryPayloadIn) else parse_telemetry_payload(raw)
-    recorded_at = payload.recorded_at or datetime.now(UTC)
+    recorded_at = payload.recorded_at or datetime.now(timezone.utc)
     events = [
         TelemetryEvent(
             event_id=str(uuid4()),

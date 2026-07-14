@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from app.edge.adapters import get_adapter
 from app.edge.contracts import EdgeAdapterConfig, PublishMode, PublishResult, RawPointValue
@@ -37,7 +37,7 @@ def collect_live_once(config: EdgeAdapterConfig) -> list[TelemetryEvent]:
                 binding=binding,
                 value=0.0,
                 quality=0.0,
-                acquired_at=datetime.now(UTC),
+                acquired_at=datetime.now(timezone.utc),
                 raw_status="read_failed",
                 raw_payload={"protocol": binding.protocol, "error": str(exc)},
             )
