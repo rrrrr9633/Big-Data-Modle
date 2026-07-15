@@ -20,7 +20,7 @@ class StreamRuntimeHandle:
     stop: Callable[[], None]
 
 
-def start_stream_runtime() -> list[StreamRuntimeHandle]:
+def start_stream_runtime(*, require_all: bool = False) -> list[StreamRuntimeHandle]:
     handles: list[StreamRuntimeHandle] = []
     stages: list[tuple[str, bool, Callable[[], object | None]]] = [
         ("mqtt-to-kafka", settings.mqtt_to_kafka_enabled, start_mqtt_to_kafka),
@@ -34,12 +34,18 @@ def start_stream_runtime() -> list[StreamRuntimeHandle]:
         ("async-inference", settings.inference_consumer_enabled, start_inference_consumer),
     ]
 
-    for name, enabled, starter in stages:
-        if not enabled:
-            continue
-        stop = starter()
-        if callable(stop):
-            handles.append(StreamRuntimeHandle(name=name, stop=stop))
+    try:
+        for name, enabled, starter in stages:
+            if not enabled:
+                continue
+            stop = starter()
+            if callable(stop):
+                handles.append(StreamRuntimeHandle(name=name, stop=stop))
+            elif require_all:
+                raise RuntimeError(f"完整模拟模式无法启动数据链路阶段：{name}")
+    except Exception:
+        stop_stream_runtime(handles)
+        raise
     return handles
 
 

@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     feature_consumer_enabled: bool = False
     inference_consumer_enabled: bool = False
     warning_suppression_seconds: int = 60
+    simulation_auto_start: bool = False
+    simulation_control_api_enabled: bool = True
+    simulation_model_bootstrap_enabled: bool = True
+    simulation_model_dataset_path: str = "../ai4i2020.csv"
+    simulation_device_count: int = 6
+    simulation_mode: str = "degrading"
+    simulation_interval_seconds: float = 1.0
+    simulation_start_delay_seconds: float = 2.0
     auth_enabled: bool = False
     auth_admin_username: str = "admin"
     auth_admin_password: str = "admin123"

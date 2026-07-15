@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from app.edge.device_stream import DeviceStreamConfig, DeviceStreamSimulator
+from app.core.config import settings
+from app.edge.device_stream import DeviceStreamConfig
+from app.services.simulation_runtime import runtime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -15,12 +17,20 @@ class SimulationStartIn(BaseModel):
     mode: SimulationMode = "degrading"
 
 
-runtime = DeviceStreamSimulator()
-
-
 def _state() -> dict[str, object]:
     state = runtime.snapshot()
-    return {"running": state.running, "cycle": state.cycle, "mode": state.config.mode, "interval_seconds": state.config.interval_seconds, "gateway_id": state.config.gateway_id, "devices": state.device_codes, "accepted_events": state.accepted_events, "failed_cycles": state.failed_cycles, "last_published_at": state.last_published_at, "last_error": state.last_error}
+    return {
+        "running": state.running,
+        "cycle": state.cycle,
+        "mode": state.config.mode,
+        "interval_seconds": state.config.interval_seconds,
+        "gateway_id": state.config.gateway_id,
+        "devices": state.device_codes,
+        "accepted_events": state.accepted_events,
+        "failed_cycles": state.failed_cycles,
+        "last_published_at": state.last_published_at,
+        "last_error": state.last_error,
+    }
 
 
 @router.get("/state")
@@ -28,8 +38,17 @@ def get_simulation_state() -> dict[str, object]:
     return _state()
 
 
+def _require_control_api() -> None:
+    if not settings.simulation_control_api_enabled:
+        raise HTTPException(
+            status_code=403,
+            detail="完整模拟由后端启动流程托管，手动控制接口已关闭",
+        )
+
+
 @router.post("/start")
 def start_simulation(payload: SimulationStartIn) -> dict[str, object]:
+    _require_control_api()
     try:
         runtime.start(DeviceStreamConfig(device_count=payload.device_count, mode=payload.mode))
     except Exception as exc:
@@ -39,6 +58,7 @@ def start_simulation(payload: SimulationStartIn) -> dict[str, object]:
 
 @router.post("/tick")
 def tick_simulation() -> dict[str, object]:
+    _require_control_api()
     if not runtime.snapshot().running:
         raise HTTPException(status_code=409, detail="仿真场景未启动")
     runtime.emit_cycle()
@@ -47,5 +67,6 @@ def tick_simulation() -> dict[str, object]:
 
 @router.post("/stop")
 def stop_simulation() -> dict[str, object]:
+    _require_control_api()
     runtime.stop()
     return _state()

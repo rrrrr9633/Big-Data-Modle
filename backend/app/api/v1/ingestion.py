@@ -10,26 +10,21 @@ from app.models.model_suite import (
     explain_ai4i_feature_row,
     model_suite_version,
     predict_ai4i_feature_row,
-    train_ai4i_model_suite,
 )
-from app.models.registry import model_feature_dependencies, save_active_model_suite
 from app.repositories.maintenance_repository import (
     create_import_batch,
-    ensure_baseline_model,
-    ensure_prediction_model_schema,
     insert_audit_log,
     insert_feature_window,
     insert_prediction,
     insert_prediction_explanations,
     insert_sensor_reading,
     insert_warning,
-    replace_model_feature_dependencies,
     upsert_device,
-    upsert_model_metric,
 )
 from app.security.auth import CurrentUser
 from app.security.policies import require_permission
 from app.services.maintenance import generate_maintenance_advice
+from app.services.model_training import train_and_register_ai4i_model
 from app.tsdb.telemetry_repository import (
     insert_device_status_event,
     insert_feature_window_event,
@@ -56,31 +51,12 @@ async def import_ai4i_csv(
 ) -> dict[str, bool | int | str]:
     content = (await file.read()).decode("utf-8-sig")
     rows = list(csv.DictReader(StringIO(content)))
-    ensure_prediction_model_schema(db)
     batch_id = create_import_batch(db, file.filename or "AI4I CSV", len(rows))
     prediction_count = 0
     warning_count = 0
 
-    ensure_baseline_model(db)
-    model_suite = train_ai4i_model_suite(rows)
-    for metric in model_suite.metrics:
-        upsert_model_metric(
-            db,
-            model_name=metric.model_name,
-            model_type=metric.model_type,
-            version=metric.version,
-            metric_name=metric.metric_name,
-            metric_value=metric.metric_value,
-        )
-    for dependency in model_feature_dependencies(model_suite):
-        replace_model_feature_dependencies(
-            db,
-            model_name=str(dependency["model_name"]),
-            version=str(dependency["version"]),
-            features=list(dependency["features"]),
-        )
-
-    save_active_model_suite(model_suite)
+    training = train_and_register_ai4i_model(db, rows)
+    model_suite = training.suite
 
     if replay_demo_data:
         prediction_count, warning_count = _replay_ai4i_rows(db, rows, batch_id, model_suite)

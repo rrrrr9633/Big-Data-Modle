@@ -309,24 +309,16 @@ def _target_from_rows(rows: list[dict[str, str]]) -> np.ndarray:
 
 def _window_vector(window: TimeSeriesWindow) -> list[float]:
     features = window.feature_values
-    if all(sensor_key in features for _feature_name, sensor_key in AI4I_SENSOR_FEATURE_MAP):
-        return [
-            float(features[sensor_key]) for _feature_name, sensor_key in AI4I_SENSOR_FEATURE_MAP
-        ]
-
-    raw_mean = features.get("raw_mean", 0.0)
-    raw_max = features.get("raw_max", raw_mean)
-    raw_min = features.get("raw_min", raw_mean)
-    spread = max(raw_max - raw_min, 0.0)
-    trend = abs(features.get("trend", 0.0))
-    quality_loss = 1 - features.get("quality_mean", 1.0)
-    return [
-        raw_mean,
-        raw_mean + trend,
-        max(1.0, raw_max * 100),
-        spread,
-        max(0.0, trend * 80 + quality_loss * 120),
+    missing = [
+        sensor_key
+        for _feature_name, sensor_key in AI4I_SENSOR_FEATURE_MAP
+        if sensor_key not in features
     ]
+    if missing:
+        raise ValueError(
+            "实时特征窗口缺少 AI4I 模型必需点位：" + ", ".join(missing)
+        )
+    return [float(features[sensor_key]) for _feature_name, sensor_key in AI4I_SENSOR_FEATURE_MAP]
 
 
 def _predict_failure_probability(feature_vector: list[float], model: LGBMClassifier) -> float:

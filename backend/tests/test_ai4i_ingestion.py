@@ -80,33 +80,13 @@ def test_ai4i_import_trains_without_replaying_demo_data_by_default(monkeypatch) 
     )
     db = SimpleNamespace(commit=lambda: calls.append("commit"))
 
-    monkeypatch.setattr(
-        ingestion,
-        "ensure_prediction_model_schema",
-        lambda _db: calls.append("schema"),
-    )
     monkeypatch.setattr(ingestion, "create_import_batch", lambda *_args: 12)
     monkeypatch.setattr(
         ingestion,
-        "ensure_baseline_model",
-        lambda _db: calls.append("baseline"),
+        "train_and_register_ai4i_model",
+        lambda _db, rows: calls.append(f"train-service:{len(rows)}")
+        or SimpleNamespace(suite=suite, trained_rows=len(rows)),
     )
-    monkeypatch.setattr(
-        ingestion,
-        "train_ai4i_model_suite",
-        lambda rows: calls.append(f"train:{len(rows)}") or suite,
-    )
-    monkeypatch.setattr(
-        ingestion,
-        "upsert_model_metric",
-        lambda *_args, **_kwargs: calls.append("metric"),
-    )
-    monkeypatch.setattr(
-        ingestion,
-        "replace_model_feature_dependencies",
-        lambda *_args, **_kwargs: calls.append("dependencies"),
-    )
-    monkeypatch.setattr(ingestion, "save_active_model_suite", lambda _suite: calls.append("save"))
     monkeypatch.setattr(ingestion, "insert_audit_log", lambda *_args, **_kwargs: None)
 
     response = asyncio.run(ingestion.import_ai4i_csv(FakeUploadFile(), db, TEST_USER))
@@ -114,17 +94,8 @@ def test_ai4i_import_trains_without_replaying_demo_data_by_default(monkeypatch) 
     assert response["mode"] == "train_only"
     assert response["trained_rows"] == 1
     assert response["replay_enabled"] is False
-    assert "dependencies" in calls
     assert response["prediction_count"] == 0
-    assert calls == [
-        "schema",
-        "baseline",
-        "train:1",
-        "metric",
-        "dependencies",
-        "save",
-        "commit",
-    ]
+    assert calls == ["train-service:1", "commit"]
 
 
 def test_ai4i_import_can_replay_demo_data_when_enabled(monkeypatch) -> None:
@@ -146,11 +117,12 @@ def test_ai4i_import_can_replay_demo_data_when_enabled(monkeypatch) -> None:
             rul_hours=120.0 if feature_values["Torque [Nm]"] < 50 else 2.0,
         )
 
-    monkeypatch.setattr(ingestion, "ensure_prediction_model_schema", lambda _db: None)
     monkeypatch.setattr(ingestion, "create_import_batch", lambda *_args: 12)
-    monkeypatch.setattr(ingestion, "ensure_baseline_model", lambda _db: None)
-    monkeypatch.setattr(ingestion, "train_ai4i_model_suite", lambda _rows: suite)
-    monkeypatch.setattr(ingestion, "save_active_model_suite", lambda _suite: None)
+    monkeypatch.setattr(
+        ingestion,
+        "train_and_register_ai4i_model",
+        lambda _db, rows: SimpleNamespace(suite=suite, trained_rows=len(rows)),
+    )
     monkeypatch.setattr(ingestion, "upsert_device", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(ingestion, "insert_sensor_reading", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(ingestion, "insert_feature_window", lambda *_args, **_kwargs: None)

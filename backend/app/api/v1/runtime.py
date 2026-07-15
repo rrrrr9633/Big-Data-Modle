@@ -15,6 +15,7 @@ from app.ops.supervision import get_supervision_status
 from app.quality.idempotency import create_redis_client
 from app.security.auth import CurrentUser
 from app.security.policies import require_permission
+from app.services.simulation_runtime import runtime as simulation_runtime
 from app.tsdb.client import tsdb_connection
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
@@ -59,6 +60,7 @@ def build_runtime_diagnostics() -> dict[str, Any]:
     dependencies = [_check_mysql(), _check_tsdb(), _check_redis(), _check_kafka(), _check_mqtt()]
     stream_consumers = _stream_consumer_states()
     model_state = get_active_model_state()
+    simulation_state = simulation_runtime.snapshot()
     production_gaps = _production_gaps(dependencies, stream_consumers, model_state.available)
     operations_readiness = build_operations_readiness(
         dependencies=dependencies,
@@ -79,6 +81,17 @@ def build_runtime_diagnostics() -> dict[str, Any]:
             "available": model_state.available,
             "saved_at": getattr(model_state, "saved_at", None),
             "model_names": getattr(model_state, "model_names", None) or [],
+        },
+        "simulation_source": {
+            "auto_start": settings.simulation_auto_start,
+            "running": simulation_state.running,
+            "mode": simulation_state.config.mode,
+            "cycle": simulation_state.cycle,
+            "device_count": len(simulation_state.device_codes),
+            "accepted_events": simulation_state.accepted_events,
+            "failed_cycles": simulation_state.failed_cycles,
+            "last_published_at": simulation_state.last_published_at,
+            "last_error": simulation_state.last_error,
         },
         "operations_readiness": operations_readiness,
         "production_gaps": production_gaps,

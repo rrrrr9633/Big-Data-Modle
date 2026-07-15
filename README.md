@@ -16,6 +16,20 @@ chmod +x scripts/start-infra.sh scripts/stop-infra.sh
 ./scripts/start-infra.sh
 ```
 
+## 启动完整模拟场景
+
+```bash
+docker compose up --build
+```
+
+Compose 模式默认启动完整模拟链路：后端在依赖健康后检查 active 模型；模型缺失时使用
+`ai4i2020.csv` 自动训练并持久化，然后启动 MQTT、Kafka、数据治理、TSDB/Redis、
+特征窗口和异步推理消费者，最后由设备模拟器仅向 MQTT 发布原始遥测。前端只读取这条
+后端链路产生的设备快照、预测和预警，不生成本地模拟业务数据。
+
+完整模拟模式必须保持后端单 worker，避免重复启动消费者和模拟数据源。普通 `uvicorn`
+启动默认不自动产生模拟数据；只有显式设置 `SIMULATION_AUTO_START=true` 才会开启。
+
 ## 启动后端
 
 ```bash

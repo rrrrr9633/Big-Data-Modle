@@ -27,6 +27,14 @@ services:
       CLEANED_TELEMETRY_CONSUMER_ENABLED: "true"
       FEATURE_CONSUMER_ENABLED: "true"
       INFERENCE_CONSUMER_ENABLED: "true"
+      SIMULATION_AUTO_START: "true"
+      SIMULATION_CONTROL_API_ENABLED: "false"
+      SIMULATION_MODEL_BOOTSTRAP_ENABLED: "true"
+      SIMULATION_MODEL_DATASET_PATH: /app/ai4i2020.csv
+      SIMULATION_DEVICE_COUNT: "6"
+      SIMULATION_MODE: degrading
+      SIMULATION_INTERVAL_SECONDS: "1.0"
+      SIMULATION_START_DELAY_SECONDS: "3.0"
       CORS_ORIGINS: '["http://localhost","http://127.0.0.1"]'
     ports:
       - "8000:8000"
@@ -34,13 +42,15 @@ services:
       mysql:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       timescaledb:
-        condition: service_started
+        condition: service_healthy
       kafka:
-        condition: service_started
+        condition: service_healthy
       emqx:
-        condition: service_started
+        condition: service_healthy
+    volumes:
+      - model_artifacts:/app/backend/artifacts
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
       interval: 10s
@@ -76,6 +86,11 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
 
   timescaledb:
@@ -91,6 +106,11 @@ services:
     volumes:
       - ./infra/timescaledb/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - timescale_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pdm -d pdm_tsdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
 
   kafka:
@@ -110,6 +130,12 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server 127.0.0.1:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
     restart: unless-stopped
 
   emqx:
@@ -122,9 +148,16 @@ services:
     environment:
       EMQX_DASHBOARD__DEFAULT_USERNAME: admin
       EMQX_DASHBOARD__DEFAULT_PASSWORD: public
+    healthcheck:
+      test: ["CMD-SHELL", "emqx ctl status >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
     restart: unless-stopped
 
 volumes:
   mysql_data:
   redis_data:
   timescale_data:
+  model_artifacts:

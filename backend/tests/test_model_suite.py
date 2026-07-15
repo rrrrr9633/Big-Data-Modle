@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+
+import pytest
 from app.compute.features import build_feature_window
 from app.governance.pipeline import standardize_readings
 from app.ingestion.ai4i import transform_ai4i_row
@@ -7,6 +10,7 @@ from app.models.model_suite import (
     predict_with_model_suite,
     train_ai4i_model_suite,
 )
+from app.schemas.timeseries import TimeSeriesWindow
 
 
 def _row(
@@ -40,6 +44,19 @@ def test_realtime_window_uses_named_ai4i_sensor_values_for_model_input() -> None
 
     assert window is not None
     assert _window_vector(window) == [298.1, 308.6, 1551.0, 42.8, 17.0]
+
+
+def test_realtime_window_rejects_missing_named_model_features() -> None:
+    now = datetime.now(timezone.utc)
+    window = TimeSeriesWindow(
+        device_id="CNC-L01-001",
+        start_time=now,
+        end_time=now,
+        feature_values={"raw_mean": 42.0, "quality_mean": 1.0},
+    )
+
+    with pytest.raises(ValueError, match="sensor_latest_air_temperature"):
+        _window_vector(window)
 
 
 def test_ai4i_model_suite_outputs_probability_anomaly_rul_and_explanations() -> None:

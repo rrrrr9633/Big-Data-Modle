@@ -28,6 +28,7 @@ vite.config.d.ts
 backend/artifacts/
 artifacts/
 backend/.edge-spool/
+.edge-spool/
 
 # OS / editor
 .DS_Store

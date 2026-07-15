@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -6,18 +8,36 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import api_router
 from app.core.config import settings
+from app.services.simulation_runtime import (
+    ensure_simulation_model,
+    start_complete_simulation,
+)
+from app.services.simulation_runtime import (
+    runtime as simulation_runtime,
+)
 from app.streams.runtime import start_stream_runtime, stop_stream_runtime
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    consumers = start_stream_runtime()
+    if settings.simulation_auto_start:
+        ensure_simulation_model()
+    consumers = start_stream_runtime(require_all=settings.simulation_auto_start)
     try:
+        if settings.simulation_auto_start:
+            await asyncio.sleep(max(settings.simulation_start_delay_seconds, 0.0))
+            state = start_complete_simulation()
+            logger.info(
+                "Complete simulation started: mode=%s devices=%s interval=%ss",
+                state.config.mode,
+                len(state.device_codes),
+                state.config.interval_seconds,
+            )
         yield
     finally:
-        from app.api.v1.simulation import runtime as device_stream_runtime
-
-        device_stream_runtime.stop()
+        simulation_runtime.stop()
         stop_stream_runtime(consumers)
 
 
