@@ -80,7 +80,7 @@ export function SettingsPage({ mock }: Props) {
   return (
     <div className="sys-page">
       <h1 className="sys-page-title">系统设置</h1>
-      <p className="sys-page-sub">仿真数据源配置、模型管理与 AI 接口预留</p>
+      <p className="sys-page-sub">仿真数据源配置、模型管理与智能中台接入</p>
 
       <div className="sys-grid-2">
         <div className="sys-panel">
@@ -164,25 +164,30 @@ export function SettingsPage({ mock }: Props) {
         </div>
 
         <div className="sys-panel">
-          <div className="sys-panel-head"><h2 className="sys-panel-title">AI 智能助手接口（预留）</h2></div>
+          <div className="sys-panel-head"><h2 className="sys-panel-title">智能中台</h2></div>
           <div className="sys-panel-body sys-stack">
             <div style={{ fontSize: 13, color: 'var(--sys-muted)', lineHeight: 1.7 }}>
-              系统已预留 AI 对话接口 <code style={{ color: 'var(--sys-cyan)' }}>POST /api/v1/ai/chat</code>，
-              后续接入大模型后即可在侧边栏「AI 智能助手」按钮启用，
-              用于自然语言查询设备状态、生成巡检建议、解释预测结果。
+              侧边栏「智能中台」对接 <code style={{ color: 'var(--sys-cyan)' }}>/api/v1/intelligence/*</code>
+              与模型二次训练 <code style={{ color: 'var(--sys-cyan)' }}>/api/v1/models/retrain</code>。
+              无密钥时总查询/问答仍可返回本地事实（degraded）；巡检为本地规则。后端不可用与仿真停止会单独提示，不伪造 AI 成功。
             </div>
             <div className="sys-form-row">
-              <span className="sys-label">接口状态</span>
-              <span className="sys-badge sys-badge-offline">未接入</span>
+              <span className="sys-label">入口</span>
+              <span className="sys-badge sys-badge-processing">#/intelligence</span>
             </div>
             <div className="sys-form-row">
-              <span className="sys-label">预留能力</span>
+              <span className="sys-label">核心接口</span>
             </div>
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: 'var(--sys-muted)', lineHeight: 1.8 }}>
-              <li>自然语言设备状态查询</li>
-              <li>预测结果智能解释（对接 SHAP 特征归因）</li>
-              <li>巡检 / 维护建议生成</li>
-              <li>预警自动分级与处置推荐</li>
+              <li><code style={{ color: 'var(--sys-cyan)' }}>GET /api/v1/intelligence/status</code></li>
+              <li><code style={{ color: 'var(--sys-cyan)' }}>POST /api/v1/intelligence/query</code> question / session_key / use_llm</li>
+              <li><code style={{ color: 'var(--sys-cyan)' }}>POST /api/v1/intelligence/chat</code> message / session_key</li>
+              <li><code style={{ color: 'var(--sys-cyan)' }}>GET /api/v1/intelligence/sessions/by-key/:key</code></li>
+              <li><code style={{ color: 'var(--sys-cyan)' }}>POST /api/v1/intelligence/knowledge/sync</code></li>
+              <li><code style={{ color: 'var(--sys-cyan)' }}>GET|PUT /api/v1/intelligence/inspection/schedule</code> minute_of_hour 0–59</li>
+              <li><code style={{ color: 'var(--sys-cyan)' }}>POST /api/v1/intelligence/inspection/run</code></li>
+              <li><code style={{ color: 'var(--sys-cyan)' }}>GET /api/v1/intelligence/inspection/reports</code> runs + reports</li>
+              <li><code style={{ color: 'var(--sys-cyan)' }}>POST /api/v1/models/retrain</code> · <code style={{ color: 'var(--sys-cyan)' }}>GET /api/v1/models/training-jobs</code></li>
             </ul>
           </div>
         </div>

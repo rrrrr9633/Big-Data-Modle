@@ -208,3 +208,121 @@ CREATE TABLE IF NOT EXISTS model_feature_dependencies (
   UNIQUE KEY uk_model_feature_dependency (model_name, version, feature_name),
   INDEX idx_model_feature_active (feature_name, status)
 );
+
+CREATE TABLE IF NOT EXISTS model_training_jobs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  status VARCHAR(32) NOT NULL DEFAULT 'pending',
+  version VARCHAR(64) NULL,
+  trained_rows INT NULL,
+  error_message TEXT NULL,
+  metrics_json JSON NULL,
+  detail_json JSON NULL,
+  created_by VARCHAR(64) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at TIMESTAMP NULL,
+  finished_at TIMESTAMP NULL,
+  INDEX idx_model_training_jobs_status_time (status, created_at)
+);
+
+CREATE TABLE IF NOT EXISTS agent_sessions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  session_key VARCHAR(64) NOT NULL UNIQUE,
+  title VARCHAR(255) NOT NULL DEFAULT '新会话',
+  user_id VARCHAR(64) NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'active',
+  metadata_json JSON NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_agent_session_user_time (user_id, updated_at)
+);
+
+CREATE TABLE IF NOT EXISTS agent_messages (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  session_id BIGINT NOT NULL,
+  role VARCHAR(32) NOT NULL,
+  content TEXT NOT NULL,
+  mode VARCHAR(32) NOT NULL DEFAULT 'chat',
+  status VARCHAR(32) NOT NULL DEFAULT 'ok',
+  facts_json JSON NULL,
+  citations_json JSON NULL,
+  tool_calls_json JSON NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_agent_message_session_time (session_id, created_at),
+  CONSTRAINT fk_agent_message_session FOREIGN KEY (session_id) REFERENCES agent_sessions(id)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_documents (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  source_type VARCHAR(64) NOT NULL,
+  source_id VARCHAR(128) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  content TEXT NOT NULL,
+  metadata_json JSON NULL,
+  content_hash VARCHAR(64) NOT NULL,
+  synced_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_knowledge_source (source_type, source_id),
+  INDEX idx_knowledge_synced (synced_at)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_chunks (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  document_id BIGINT NOT NULL,
+  chunk_index INT NOT NULL DEFAULT 0,
+  content TEXT NOT NULL,
+  keywords VARCHAR(512) NULL,
+  metadata_json JSON NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_knowledge_chunk (document_id, chunk_index),
+  INDEX idx_knowledge_chunk_keywords (keywords),
+  CONSTRAINT fk_knowledge_chunk_document FOREIGN KEY (document_id) REFERENCES knowledge_documents(id)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_sync_cursors (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  source_type VARCHAR(64) NOT NULL UNIQUE,
+  last_source_id BIGINT NOT NULL DEFAULT 0,
+  last_synced_at TIMESTAMP NULL,
+  total_synced INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS inspection_schedules (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  schedule_key VARCHAR(64) NOT NULL UNIQUE DEFAULT 'default',
+  enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  minute_of_hour TINYINT NOT NULL DEFAULT 0,
+  device_limit INT NOT NULL DEFAULT 50,
+  last_triggered_at TIMESTAMP NULL,
+  last_run_id BIGINT NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS inspection_runs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  trigger_type VARCHAR(32) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'running',
+  summary TEXT NULL,
+  device_total INT NOT NULL DEFAULT 0,
+  issue_total INT NOT NULL DEFAULT 0,
+  error_message TEXT NULL,
+  started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  finished_at TIMESTAMP NULL,
+  INDEX idx_inspection_run_status_time (status, started_at)
+);
+
+CREATE TABLE IF NOT EXISTS inspection_reports (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  run_id BIGINT NOT NULL,
+  device_code VARCHAR(64) NULL,
+  severity VARCHAR(32) NOT NULL DEFAULT 'info',
+  title VARCHAR(255) NOT NULL,
+  detail TEXT NOT NULL,
+  findings_json JSON NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_inspection_report_run (run_id),
+  INDEX idx_inspection_report_device (device_code),
+  CONSTRAINT fk_inspection_report_run FOREIGN KEY (run_id) REFERENCES inspection_runs(id)
+);

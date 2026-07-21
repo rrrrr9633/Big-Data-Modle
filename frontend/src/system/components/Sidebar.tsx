@@ -48,11 +48,14 @@ export function Sidebar({ warningCount, onExit }: Props) {
       ))}
 
       <div className="sys-sidebar-footer">
-        {/* AI 接口预留 — 后续接入 */}
-        <button className="sys-ai-btn" disabled title="AI 智能助手（即将上线）">
+        <button
+          className={`sys-ai-btn${page === 'intelligence' ? ' active' : ''}`}
+          title="智能中台"
+          onClick={() => navigate('intelligence')}
+        >
           <Robot size={16} />
-          AI 智能助手
-          <Lightning size={12} style={{ marginLeft: 'auto', opacity: 0.6 }} />
+          智能中台
+          <Lightning size={12} style={{ marginLeft: 'auto', opacity: 0.85 }} weight="fill" />
         </button>
         <button
           className="sys-nav-btn"

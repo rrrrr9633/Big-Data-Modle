@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import api_router
 from app.core.config import settings
+from app.intelligence.inspection import inspection_scheduler
 from app.services.simulation_runtime import (
     ensure_simulation_model,
     start_complete_simulation,
@@ -29,6 +30,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         if settings.simulation_auto_start
         else []
     )
+    inspection_scheduler.start()
     try:
         if settings.simulation_auto_start:
             await asyncio.sleep(max(settings.simulation_start_delay_seconds, 0.0))
@@ -41,6 +43,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             )
         yield
     finally:
+        inspection_scheduler.stop()
         simulation_runtime.stop()
         stop_stream_runtime(consumers)
 

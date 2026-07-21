@@ -14,6 +14,7 @@ from app.ingestion.local_adapter import accept_payload_locally
 from app.ingestion.mqtt_simulator import publish_payload_to_mqtt
 from app.realtime.device_snapshot import clear_local_device_snapshots
 from app.repositories.maintenance_repository import upsert_device, upsert_sensor_point
+from app.training_data.archive import default_archive_observer
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,8 @@ POINTS: dict[str, dict[str, object]] = {
     "spindle_load": {"name": "主轴负载", "unit": "%", "min": 0, "max": 100},
     "vibration_rms": {"name": "振动 RMS", "unit": "mm/s", "min": 0, "max": 20},
 }
+
+ArchiveObserver = Callable[..., None]
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,7 @@ class DeviceStreamSimulator:
         publishers: dict[str, Callable[..., dict[str, object]]] | None = None,
         provisioner: Callable[[DeviceStreamConfig, list[str]], None] | None = None,
         scenario_rng: random.Random | None = None,
+        archive_observer: ArchiveObserver | None = default_archive_observer,
     ) -> None:
         self._publishers = publishers or {
             "local": accept_payload_locally,
@@ -71,6 +75,8 @@ class DeviceStreamSimulator:
         }
         self._provisioner = provisioner or provision_devices
         self._scenario_rng = scenario_rng or random.SystemRandom()
+        # None disables archiving; default keeps daily AI4I archive on.
+        self._archive_observer = archive_observer
         self._runtime = DeviceStreamRuntime()
         self._simulators: dict[str, IndustrialDeviceSimulator] = {}
         self._stop_event = threading.Event()
@@ -141,7 +147,23 @@ class DeviceStreamSimulator:
             publisher = self._publishers[config.transport]
             for device_code, simulator in simulators:
                 readings = simulator.next_cycle(cycle=cycle)
-                payload = TelemetryPayloadIn(device_code=device_code, device_name=f"数控机床 {device_code}", device_type="CNC", recorded_at=datetime.now(timezone.utc), readings=[{"sensor_code": code, "value": reading.value, "unit": str(POINTS[code]["unit"]), "quality": reading.quality, "status": reading.raw_status} for code, reading in readings.items()])
+                payload = TelemetryPayloadIn(
+                    device_code=device_code,
+                    device_name=f"数控机床 {device_code}",
+                    device_type="CNC",
+                    recorded_at=datetime.now(timezone.utc),
+                    readings=[
+                        {
+                            "sensor_code": code,
+                            "value": reading.value,
+                            "unit": str(POINTS[code]["unit"]),
+                            "quality": reading.quality,
+                            "status": reading.raw_status,
+                        }
+                        for code, reading in readings.items()
+                    ],
+                )
+                self._observe_archive(payload, mode=simulator.mode)
                 accepted += int(publisher(payload, gateway_id=config.gateway_id).get("accepted_events", 0))
             with self._lock:
                 self._runtime.cycle = cycle
@@ -155,9 +177,34 @@ class DeviceStreamSimulator:
                 self._runtime.last_error = str(exc)
         return self.snapshot()
 
+    def _observe_archive(self, payload: TelemetryPayloadIn, *, mode: str) -> None:
+        observer = self._archive_observer
+        if observer is None:
+            return
+        try:
+            observer(payload, mode=mode)
+        except TypeError:
+            # Backward-compatible observers that only accept the payload.
+            try:
+                observer(payload)
+            except Exception:
+                logger.exception("AI4I archive observer failed; device stream continues")
+        except Exception:
+            logger.exception("AI4I archive observer failed; device stream continues")
+
     def snapshot(self) -> DeviceStreamRuntime:
         with self._lock:
-            return DeviceStreamRuntime(running=self._runtime.running, cycle=self._runtime.cycle, config=self._runtime.config, device_codes=list(self._runtime.device_codes), accepted_events=self._runtime.accepted_events, failed_cycles=self._runtime.failed_cycles, last_published_at=self._runtime.last_published_at, last_error=self._runtime.last_error, scenario_devices=list(self._runtime.scenario_devices))
+            return DeviceStreamRuntime(
+                running=self._runtime.running,
+                cycle=self._runtime.cycle,
+                config=self._runtime.config,
+                device_codes=list(self._runtime.device_codes),
+                accepted_events=self._runtime.accepted_events,
+                failed_cycles=self._runtime.failed_cycles,
+                last_published_at=self._runtime.last_published_at,
+                last_error=self._runtime.last_error,
+                scenario_devices=list(self._runtime.scenario_devices),
+            )
 
     def _run(self) -> None:
         while not self._stop_event.wait(max(self.snapshot().config.interval_seconds, 0.1)):
@@ -168,7 +215,29 @@ def provision_devices(config: DeviceStreamConfig, device_codes: list[str]) -> No
     """Register assets before first publish so raw point validation stays unchanged."""
     with SessionLocal() as db:
         for device_code in device_codes:
-            upsert_device(db, device_code=device_code, device_name=f"数控机床 {device_code}", device_type="CNC", status="online", factory=config.factory, workshop=config.workshop, production_line=config.production_line)
+            upsert_device(
+                db,
+                device_code=device_code,
+                device_name=f"数控机床 {device_code}",
+                device_type="CNC",
+                status="online",
+                factory=config.factory,
+                workshop=config.workshop,
+                production_line=config.production_line,
+            )
             for point_code, point in POINTS.items():
-                upsert_sensor_point(db, device_code=device_code, sensor_code=point_code, sensor_name=str(point["name"]), unit=str(point["unit"]), sampling_frequency=f"{config.interval_seconds:g}s", protocol=config.transport, source_address=f"{device_code}/{point_code}", protocol_options={"gateway_id": config.gateway_id, "transport": config.transport}, min_value=float(point["min"]), max_value=float(point["max"]), enabled=True)
+                upsert_sensor_point(
+                    db,
+                    device_code=device_code,
+                    sensor_code=point_code,
+                    sensor_name=str(point["name"]),
+                    unit=str(point["unit"]),
+                    sampling_frequency=f"{config.interval_seconds:g}s",
+                    protocol=config.transport,
+                    source_address=f"{device_code}/{point_code}",
+                    protocol_options={"gateway_id": config.gateway_id, "transport": config.transport},
+                    min_value=float(point["min"]),
+                    max_value=float(point["max"]),
+                    enabled=True,
+                )
         db.commit()

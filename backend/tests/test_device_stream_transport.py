@@ -15,6 +15,7 @@ def test_local_transport_emits_without_touching_mqtt() -> None:
     stream = DeviceStreamSimulator(
         publishers={"local": accept_payload_locally, "mqtt": unavailable_mqtt},
         provisioner=lambda _config, _devices: None,
+        archive_observer=None,
     )
     try:
         state = stream.start(
@@ -38,6 +39,7 @@ def test_sudden_fault_selects_exactly_two_random_devices_and_progresses() -> Non
     stream = DeviceStreamSimulator(
         scenario_rng=random.Random(11),
         provisioner=lambda _config, _devices: None,
+        archive_observer=None,
     )
     try:
         state = stream.start(DeviceStreamConfig(device_count=6, mode="sudden_fault", interval_seconds=60))

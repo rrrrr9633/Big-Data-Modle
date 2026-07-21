@@ -4,7 +4,7 @@ import { useRouter } from '../router';
 const PAGE_LABELS: Record<string, string> = {
   overview: '运行总览', monitoring: '实时监测', prediction: '故障预测',
   health: '健康评估', inspection: '智能巡检', warnings: '预警处置',
-  model: '模型训练', settings: '系统设置',
+  model: '模型训练', intelligence: '智能中台', settings: '系统设置',
 };
 
 interface StatusItem { label: string; tone: 'ok' | 'warn' | 'err' | 'idle'; value: string }

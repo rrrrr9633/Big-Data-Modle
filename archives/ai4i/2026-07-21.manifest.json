@@ -1,0 +1,24 @@
+{
+  "day": "2026-07-21",
+  "row_count": 480,
+  "journal_path": "/Users/chenhaoran/Desktop/Design and Implementation of Equipment Fault Prediction and Health Evaluation System Based on Industrial Internet of Things Big Data/archives/ai4i/journal/2026-07-21.jsonl",
+  "csv_path": "/Users/chenhaoran/Desktop/Design and Implementation of Equipment Fault Prediction and Health Evaluation System Based on Industrial Internet of Things Big Data/archives/ai4i/2026-07-21.csv",
+  "skipped_corrupt_lines": 0,
+  "materialized_at": "2026-07-21T04:04:12.705312+00:00",
+  "headers": [
+    "UDI",
+    "Product ID",
+    "Type",
+    "Air temperature [K]",
+    "Process temperature [K]",
+    "Rotational speed [rpm]",
+    "Torque [Nm]",
+    "Tool wear [min]",
+    "Machine failure",
+    "TWF",
+    "HDF",
+    "PWF",
+    "OSF",
+    "RNF"
+  ]
+}

@@ -10,8 +10,9 @@ import { PredictionPage }  from './pages/PredictionPage';
 import { HealthPage }      from './pages/HealthPage';
 import { InspectionPage }  from './pages/InspectionPage';
 import { WarningsPage }    from './pages/WarningsPage';
-import { ModelPage }       from './pages/ModelPage';
-import { SettingsPage }    from './pages/SettingsPage';
+import { ModelPage }         from './pages/ModelPage';
+import { IntelligencePage }  from './pages/IntelligencePage';
+import { SettingsPage }      from './pages/SettingsPage';
 
 interface Props { onExit: () => void }
 
@@ -48,8 +49,9 @@ export function SystemShell({ onExit }: Props) {
     health:     <HealthPage     mock={mock} />,
     inspection: <InspectionPage mock={mock} />,
     warnings:   <WarningsPage   mock={mock} />,
-    model:      <ModelPage />,
-    settings:   <SettingsPage   mock={mock} />,
+    model:        <ModelPage />,
+    intelligence: <IntelligencePage mock={mock} />,
+    settings:     <SettingsPage   mock={mock} />,
   };
 
   return (

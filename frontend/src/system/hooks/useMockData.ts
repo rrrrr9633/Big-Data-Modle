@@ -432,6 +432,8 @@ export function useMockData() {
       : generateInspections(tick),
     dashboard,
     deviceIds: devices.map(device => device.device_code),
+    simulationRunning,
+    liveBackendAvailable,
     markSimulationStarted,
     markSimulationStopped,
   };

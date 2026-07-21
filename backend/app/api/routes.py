@@ -7,6 +7,7 @@ from app.api.v1 import (
     health,
     ingestion,
     ingress,
+    intelligence,
     models,
     predictions,
     quality,
@@ -32,3 +33,4 @@ api_router.include_router(quality.router, prefix="/quality", tags=["quality"])
 api_router.include_router(telemetry.router, prefix="/telemetry", tags=["telemetry"])
 api_router.include_router(runtime.router, prefix="/runtime", tags=["runtime"])
 api_router.include_router(simulation.router, prefix="/simulation", tags=["simulation"])
+api_router.include_router(intelligence.router, prefix="/intelligence", tags=["intelligence"])
