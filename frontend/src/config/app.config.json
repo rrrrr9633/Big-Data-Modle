@@ -1,0 +1,27 @@
+{
+  "entrance": {
+    "enabled": true,
+    "route": "#/",
+    "title": "设备故障预测与健康评估系统",
+    "subtitle": "Industrial IoT Predictive Maintenance"
+  },
+  "system": {
+    "route": "#/overview",
+    "entry": "#/overview",
+    "title": "PDM 工业监控平台",
+    "subtitle": "设备健康评估系统 v1.0",
+    "logo": "Factory"
+  },
+  "api": {
+    "base": "/api/v1",
+    "timeout": 8000,
+    "aiEndpoint": null,
+    "simulationEnabled": true,
+    "pollingIntervalMs": 3000
+  },
+  "simulation": {
+    "deviceCount": 6,
+    "defaultMode": "degrading",
+    "autoStart": true
+  }
+}

@@ -113,3 +113,22 @@ def test_industrial_simulator_models_degradation_and_quality_faults_deterministi
     assert late["spindle_temperature"].value > early["spindle_temperature"].value
     assert fault["spindle_temperature"].quality < 1.0
     assert fault["spindle_temperature"].raw_status == "sensor_stuck"
+
+
+def test_fault_modes_are_device_specific_and_visible_in_values_and_quality() -> None:
+    normal_a = IndustrialDeviceSimulator(device_code="A", seed=1, mode="normal").next_cycle(cycle=1)
+    normal_b = IndustrialDeviceSimulator(device_code="B", seed=2, mode="normal").next_cycle(cycle=1)
+    assert normal_a["spindle_temperature"].value != normal_b["spindle_temperature"].value
+
+    stuck = IndustrialDeviceSimulator(device_code="STUCK", seed=4, mode="sensor_stuck")
+    stuck_first = stuck.next_cycle(cycle=1)
+    stuck_later = stuck.next_cycle(cycle=10)
+    stuck_sensors = [name for name, reading in stuck_first.items() if reading.quality < 1.0]
+    assert len(stuck_sensors) == 2
+    assert all(stuck_first[name].value == stuck_later[name].value for name in stuck_sensors)
+
+    drift = IndustrialDeviceSimulator(device_code="DRIFT", seed=5, mode="sensor_drift")
+    drift_first = drift.next_cycle(cycle=1)
+    drift_later = drift.next_cycle(cycle=10)
+    assert drift_later["spindle_temperature"].value > drift_first["spindle_temperature"].value
+    assert sum(reading.quality < 1.0 for reading in drift_first.values()) == 2

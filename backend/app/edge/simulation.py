@@ -30,44 +30,104 @@ class IndustrialDeviceSimulator:
         "vibration_rms": 1.4,
     }
 
-    def __init__(self, *, device_code: str, seed: int = 1, mode: str = "normal") -> None:
+    def __init__(
+        self,
+        *,
+        device_code: str,
+        seed: int = 1,
+        mode: str = "normal",
+        fault_start_cycle: int = 0,
+    ) -> None:
         self.device_code = device_code
         self.seed = seed
         self.mode = mode
-        self._stuck_values: dict[str, float] | None = None
+        self.fault_start_cycle = max(fault_start_cycle, 0)
+        profile_rng = random.Random(f"profile:{seed}:{device_code}")
+        self._profile = {
+            "thermal_bias": profile_rng.uniform(-2.5, 5.0),
+            "speed_factor": profile_rng.uniform(0.91, 1.07),
+            "load_factor": profile_rng.uniform(0.88, 1.16),
+            "wear_bias": profile_rng.uniform(0.0, 38.0),
+            "vibration_bias": profile_rng.uniform(-0.18, 0.75),
+            "age_cycles": profile_rng.uniform(0.0, 48.0),
+            "fault_severity": profile_rng.uniform(0.68, 1.32),
+            "drift_rate": profile_rng.uniform(0.18, 0.52),
+        }
+        sensor_pool = ["vibration_rms", "spindle_load", "torque"]
+        profile_rng.shuffle(sensor_pool)
+        self._fault_sensors = {"spindle_temperature", sensor_pool[0]}
+        self._stuck_values: dict[str, float] = {}
 
     def next_cycle(self, *, cycle: int) -> dict[str, SimulatedReading]:
         rng = random.Random(f"{self.seed}:{self.device_code}:{cycle}")
-        pressure = min(max(cycle, 0) / 120.0, 1.0) if self.mode == "degrading" else 0.0
+        profile = self._profile
+        pressure = (
+            min(max(cycle + profile["age_cycles"], 0.0) / 135.0, 1.0)
+            if self.mode == "degrading"
+            else 0.0
+        )
         values = {
             name: value * (1 + rng.uniform(-0.012, 0.012))
             for name, value in self._BASELINE.items()
         }
-        values["tool_wear"] += 55.0 * pressure
-        values["spindle_temperature"] += 30.0 * pressure
-        values["process_temperature"] += 8.0 * pressure
-        values["spindle_load"] += 24.0 * pressure
-        values["vibration_rms"] += 4.5 * pressure
-        values["rotational_speed"] *= 1 - 0.12 * pressure
+        values["air_temperature"] += profile["thermal_bias"] * 0.35
+        values["process_temperature"] += profile["thermal_bias"]
+        values["spindle_temperature"] += profile["thermal_bias"]
+        values["rotational_speed"] *= profile["speed_factor"]
+        values["torque"] *= profile["load_factor"]
+        values["spindle_load"] *= profile["load_factor"]
+        values["tool_wear"] += profile["wear_bias"]
+        values["vibration_rms"] += profile["vibration_bias"]
 
+        values["tool_wear"] += 55.0 * pressure * profile["fault_severity"]
+        values["spindle_temperature"] += 30.0 * pressure * profile["fault_severity"]
+        values["process_temperature"] += 8.0 * pressure * profile["fault_severity"]
+        values["spindle_load"] += 24.0 * pressure * profile["fault_severity"]
+        values["vibration_rms"] += 4.5 * pressure * profile["fault_severity"]
+        values["rotational_speed"] *= 1 - 0.12 * pressure * profile["fault_severity"]
+
+        quality_by_sensor = {name: 1.0 for name in values}
+        status_by_sensor = {name: "good" for name in values}
         if self.mode == "sudden_fault":
-            values["spindle_temperature"] += 46.0
-            values["vibration_rms"] += 7.0
-            values["torque"] *= 1.32
-        if self.mode == "sensor_stuck":
-            self._stuck_values = self._stuck_values or values.copy()
-            values = self._stuck_values.copy()
-        if self.mode == "sensor_drift":
-            values["spindle_temperature"] += cycle * 0.25
+            elapsed = max(cycle - self.fault_start_cycle + 1, 0)
+            progression = min(elapsed / 18.0, 1.0)
+            severity = profile["fault_severity"] * progression
+            values["spindle_temperature"] += 32.0 * severity
+            values["vibration_rms"] += 4.8 * severity
+            values["torque"] *= 1 + 0.22 * severity
+            for sensor in ("spindle_temperature", "vibration_rms", "torque"):
+                quality_by_sensor[sensor] = max(0.62, 1.0 - 0.28 * progression)
+                status_by_sensor[sensor] = "sudden_fault" if progression > 0 else "fault_emerging"
+        elif self.mode == "sensor_stuck":
+            for sensor in self._fault_sensors:
+                self._stuck_values.setdefault(sensor, values[sensor])
+                values[sensor] = self._stuck_values[sensor]
+                quality_by_sensor[sensor] = 0.45
+                status_by_sensor[sensor] = "sensor_stuck"
+        elif self.mode == "sensor_drift":
+            drift = 5.0 + cycle * profile["drift_rate"]
+            drift_scale = {
+                "spindle_temperature": 1.0,
+                "vibration_rms": 0.12,
+                "spindle_load": 0.6,
+                "torque": 0.35,
+            }
+            for sensor in self._fault_sensors:
+                values[sensor] += drift * drift_scale[sensor]
+                quality_by_sensor[sensor] = 0.55
+                status_by_sensor[sensor] = "sensor_drift"
 
-        quality = 0.55 if self.mode in {"sensor_stuck", "sensor_drift"} else 1.0
-        status = self.mode if quality < 1.0 else "good"
         return {
             name: SimulatedReading(
                 value=round(value, 4),
-                quality=quality,
-                raw_status=status,
-                raw_payload={"device_mode": self.mode, "cycle": cycle, "seed": self.seed},
+                quality=quality_by_sensor[name],
+                raw_status=status_by_sensor[name],
+                raw_payload={
+                    "device_mode": self.mode,
+                    "cycle": cycle,
+                    "seed": self.seed,
+                    "fault_sensors": sorted(self._fault_sensors),
+                },
             )
             for name, value in values.items()
         }

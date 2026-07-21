@@ -32,18 +32,19 @@ def ensure_simulation_model() -> ActiveModelState:
 
 
 def start_complete_simulation() -> DeviceStreamRuntime:
-    _validate_stream_configuration()
+    validate_complete_stream_configuration()
     ensure_simulation_model()
     return runtime.start(
         DeviceStreamConfig(
             device_count=settings.simulation_device_count,
             mode=settings.simulation_mode,
             interval_seconds=settings.simulation_interval_seconds,
+            transport="mqtt",
         )
     )
 
 
-def _validate_stream_configuration() -> None:
+def validate_complete_stream_configuration() -> None:
     stages = {
         "MQTT_TO_KAFKA_ENABLED": settings.mqtt_to_kafka_enabled,
         "RAW_TELEMETRY_CONSUMER_ENABLED": settings.raw_telemetry_consumer_enabled,

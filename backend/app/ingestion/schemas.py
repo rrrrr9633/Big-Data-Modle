@@ -15,6 +15,7 @@ class TelemetryEvent(BaseModel):
     value: float
     unit: str | None = Field(default=None, max_length=32)
     quality: float = Field(default=1.0, ge=0.0, le=1.0)
+    status: str = Field(default="good", max_length=32)
     ts: datetime
     gateway_id: str | None = Field(default=None, max_length=64)
     source_topic: str | None = None

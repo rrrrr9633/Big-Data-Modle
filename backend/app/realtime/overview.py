@@ -42,10 +42,15 @@ def fetch_realtime_device(db: Session, device_code: str) -> dict[str, object]:
     warnings = [
         item for item in fetch_warnings(db, limit=100) if item.get("device_code") == device_code
     ]
+    latest_points = (
+        list(snapshot["points"].values())
+        if snapshot is not None and isinstance(snapshot.get("points"), dict)
+        else fetch_latest_telemetry_points(device_code=device_code)
+    )
     return {
         "device_code": device_code,
         "snapshot": snapshot,
-        "latest_points": fetch_latest_telemetry_points(device_code=device_code),
+        "latest_points": latest_points,
         "latest_prediction": predictions[0] if predictions else None,
         "latest_warning": warnings[0] if warnings else None,
     }

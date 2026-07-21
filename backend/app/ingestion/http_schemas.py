@@ -11,6 +11,8 @@ class TelemetryReadingIn(BaseModel):
     sensor_code: str = Field(min_length=1, max_length=64)
     value: float
     unit: str | None = None
+    quality: float = Field(default=1.0, ge=0.0, le=1.0)
+    status: str = Field(default="good", max_length=32)
 
 
 class TelemetryPayloadIn(BaseModel):

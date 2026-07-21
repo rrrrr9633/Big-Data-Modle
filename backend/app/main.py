@@ -24,7 +24,11 @@ logger = logging.getLogger(__name__)
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     if settings.simulation_auto_start:
         ensure_simulation_model()
-    consumers = start_stream_runtime(require_all=settings.simulation_auto_start)
+    consumers = (
+        start_stream_runtime(require_all=True)
+        if settings.simulation_auto_start
+        else []
+    )
     try:
         if settings.simulation_auto_start:
             await asyncio.sleep(max(settings.simulation_start_delay_seconds, 0.0))
