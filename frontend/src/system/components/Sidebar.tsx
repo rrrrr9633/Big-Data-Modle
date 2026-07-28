@@ -4,7 +4,12 @@ import {
 } from '@phosphor-icons/react';
 import { useRouter, type SystemPage } from '../router';
 
-interface Props { warningCount: number; onExit: () => void }
+interface Props {
+  warningCount: number;
+  intelligenceOpen: boolean;
+  onOpenIntelligence: () => void;
+  onExit: () => void;
+}
 
 const NAV: Array<{ page: SystemPage; label: string; icon: typeof SquaresFour; group: string }> = [
   { page: 'overview',   label: '运行总览',   icon: SquaresFour,         group: '监控中心' },
@@ -19,7 +24,7 @@ const NAV: Array<{ page: SystemPage; label: string; icon: typeof SquaresFour; gr
 
 const GROUPS = [...new Set(NAV.map(n => n.group))];
 
-export function Sidebar({ warningCount, onExit }: Props) {
+export function Sidebar({ warningCount, intelligenceOpen, onOpenIntelligence, onExit }: Props) {
   const { page, navigate } = useRouter();
 
   return (
@@ -49,9 +54,9 @@ export function Sidebar({ warningCount, onExit }: Props) {
 
       <div className="sys-sidebar-footer">
         <button
-          className={`sys-ai-btn${page === 'intelligence' ? ' active' : ''}`}
-          title="智能中台"
-          onClick={() => navigate('intelligence')}
+          className={`sys-ai-btn${intelligenceOpen ? ' active' : ''}`}
+          title="打开智能中台"
+          onClick={onOpenIntelligence}
         >
           <Robot size={16} />
           智能中台

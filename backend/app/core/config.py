@@ -9,12 +9,12 @@ class Settings(BaseSettings):
     project_name: str = "工业设备预测性维护系统"
     version: str = "0.1.0"
     api_prefix: str = "/api/v1"
-    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    cors_origins: list[str] = []
 
-    mysql_url: str = "mysql+pymysql://root:123123@127.0.0.1:3306/pdm"
-    redis_url: str = "redis://127.0.0.1:6379/0"
-    tsdb_url: str = "postgresql://pdm:123123@127.0.0.1:5432/pdm_tsdb"
-    kafka_bootstrap_servers: str = "127.0.0.1:9092"
+    mysql_url: str = ""
+    redis_url: str = ""
+    tsdb_url: str = ""
+    kafka_bootstrap_servers: str = ""
     kafka_api_version: str = "4.0"
     kafka_telemetry_raw_topic: str = "factory.telemetry.raw"
     kafka_telemetry_cleaned_topic: str = "factory.telemetry.cleaned"
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     kafka_feature_group_id: str = "pdm-feature-window-builder"
     kafka_inference_group_id: str = "pdm-async-inference"
     feature_window_reading_limit: int = 120
-    mqtt_broker_host: str = "127.0.0.1"
+    mqtt_broker_host: str = ""
     mqtt_broker_port: int = 1883
     mqtt_telemetry_topic: str = "factory/+/workshop/+/line/+/machine/+/telemetry"
     mqtt_client_id: str = "pdm-mqtt-to-kafka"

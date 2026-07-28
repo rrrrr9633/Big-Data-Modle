@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import random
 import time
 from dataclasses import dataclass
@@ -51,7 +52,11 @@ def project_root() -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Replay AI4I rows as realtime device telemetry.")
     parser.add_argument("--csv", type=Path, default=project_root() / "ai4i2020.csv")
-    parser.add_argument("--endpoint", default="http://127.0.0.1:8000/api/v1/telemetry/readings")
+    parser.add_argument(
+        "--endpoint",
+        default=os.getenv("PDM_TELEMETRY_ENDPOINT", ""),
+        help="Telemetry API URL; defaults to PDM_TELEMETRY_ENDPOINT.",
+    )
     parser.add_argument("--devices", type=int, default=20)
     parser.add_argument("--interval", type=float, default=1.0)
     parser.add_argument("--cycles", type=int, default=0, help="0 means run until interrupted.")
@@ -154,6 +159,8 @@ def post_json(endpoint: str, payload: dict[str, object], timeout: float) -> dict
 
 def run() -> None:
     args = parse_args()
+    if not args.dry_run and not args.endpoint:
+        raise SystemExit("Set PDM_TELEMETRY_ENDPOINT or pass --endpoint.")
     normal, fault = load_samples(args.csv)
     devices = build_devices(args.devices, fault_rate=args.fault_rate, degrade_rate=args.degrade_rate)
     cycle = 0

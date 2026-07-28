@@ -1,7 +1,7 @@
 // API client — falls back gracefully when backend is unreachable.
-// The config's api.base is proxied via Vite (/api/v1).
-
-const BASE = '/api/v1';
+// 留空时走同源 /api；跨域部署通过 VITE_API_BASE_URL 在构建时注入。
+const configuredApiBase = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/$/, '');
+const BASE = configuredApiBase || '/api/v1';
 const TIMEOUT = 8000;
 const AI_TIMEOUT = 45000;
 

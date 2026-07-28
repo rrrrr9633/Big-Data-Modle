@@ -897,3 +897,84 @@
   .intelligence-chat-panel { max-height: none; }
   .intelligence-chat-scroll { max-height: 48dvh; }
 }
+
+/* The workspace remains mounted only while the drawer is visible; its own
+   local/session persistence keeps active work intact across open/close cycles. */
+.intelligence-modal-backdrop {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(2, 8, 18, .58);
+  backdrop-filter: blur(2px);
+  animation: intelligence-backdrop-in .18s ease-out;
+}
+.intelligence-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(940px, calc(100vw - 40px));
+  height: 100dvh;
+  border-left: 1px solid var(--sys-border-b);
+  background: var(--sys-bg);
+  box-shadow: -20px 0 52px rgba(0, 0, 0, .42);
+  animation: intelligence-drawer-in .24s cubic-bezier(.2, .8, .2, 1);
+  outline: 0;
+}
+.intelligence-modal-head {
+  display: flex;
+  flex: 0 0 var(--topbar-h);
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--sys-border);
+  background: linear-gradient(90deg, rgba(15, 30, 54, .96), rgba(12, 22, 40, .96));
+}
+.intelligence-modal-title,
+.intelligence-modal-title > div { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.intelligence-modal-title strong { display: block; color: var(--sys-text); font-size: 14px; }
+.intelligence-modal-title span:not(.intelligence-modal-mark) { display: block; color: var(--sys-muted); font-size: 11px; white-space: nowrap; }
+.intelligence-modal-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(0, 200, 230, .32);
+  border-radius: 8px;
+  color: var(--sys-cyan);
+  background: rgba(0, 200, 230, .09);
+}
+.intelligence-modal-close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--sys-border);
+  border-radius: 7px;
+  color: var(--sys-muted);
+  background: transparent;
+}
+.intelligence-modal-close:hover { color: var(--sys-text); border-color: var(--sys-border-b); background: rgba(61, 130, 255, .1); }
+.intelligence-modal-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.intelligence-modal .intelligence-page {
+  min-height: 100%;
+  padding: 16px 18px;
+}
+.intelligence-modal .intelligence-panel,
+.intelligence-modal .intelligence-chat-panel { max-height: calc(100dvh - 250px); }
+@keyframes intelligence-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes intelligence-drawer-in { from { transform: translateX(36px); opacity: .72; } to { transform: translateX(0); opacity: 1; } }
+@media (max-width: 700px) {
+  .intelligence-modal { width: 100vw; }
+  .intelligence-modal-title span:not(.intelligence-modal-mark) { display: none; }
+  .intelligence-modal .intelligence-page { padding: 12px; }
+  .intelligence-modal .intelligence-header { align-items: center; }
+  .intelligence-modal .intelligence-status-meta { display: none; }
+}

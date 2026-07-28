@@ -2,6 +2,7 @@ import { useRef, useEffect, useState } from 'react';
 import gsap from 'gsap';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
+import { IntelligenceModal } from './components/IntelligenceModal';
 import { useRouter, type SystemPage } from './router';
 import { useMockData } from './hooks/useMockData';
 import { OverviewPage }    from './pages/OverviewPage';
@@ -10,9 +11,8 @@ import { PredictionPage }  from './pages/PredictionPage';
 import { HealthPage }      from './pages/HealthPage';
 import { InspectionPage }  from './pages/InspectionPage';
 import { WarningsPage }    from './pages/WarningsPage';
-import { ModelPage }         from './pages/ModelPage';
-import { IntelligencePage }  from './pages/IntelligencePage';
-import { SettingsPage }      from './pages/SettingsPage';
+import { ModelPage }       from './pages/ModelPage';
+import { SettingsPage }    from './pages/SettingsPage';
 
 interface Props { onExit: () => void }
 
@@ -20,9 +20,18 @@ export function SystemShell({ onExit }: Props) {
   const { page } = useRouter();
   const mock = useMockData();
   const mainRef = useRef<HTMLElement>(null);
+  const [isIntelligenceOpen, setIsIntelligenceOpen] = useState(
+    () => window.location.hash === '#/intelligence',
+  );
   // Two-phase state lets us fade the old page out before swapping content,
   // then fade the new page in — a true crossfade instead of a hard cut.
   const [displayPage, setDisplayPage] = useState<SystemPage>(page);
+
+  useEffect(() => {
+    if (window.location.hash === '#/intelligence') {
+      window.history.replaceState(null, '', '#/overview');
+    }
+  }, []);
 
   useEffect(() => {
     if (page === displayPage || !mainRef.current) { setDisplayPage(page); return; }
@@ -49,18 +58,25 @@ export function SystemShell({ onExit }: Props) {
     health:     <HealthPage     mock={mock} />,
     inspection: <InspectionPage mock={mock} />,
     warnings:   <WarningsPage   mock={mock} />,
-    model:        <ModelPage />,
-    intelligence: <IntelligencePage mock={mock} />,
-    settings:     <SettingsPage   mock={mock} />,
+    model:       <ModelPage />,
+    settings:    <SettingsPage   mock={mock} />,
   };
 
   return (
     <div className="sys-root">
       <TopBar statusItems={statusItems} onExit={onExit} />
-      <Sidebar warningCount={newWarnings} onExit={onExit} />
+      <Sidebar
+        warningCount={newWarnings}
+        intelligenceOpen={isIntelligenceOpen}
+        onOpenIntelligence={() => setIsIntelligenceOpen(true)}
+        onExit={onExit}
+      />
       <main className="sys-main" ref={mainRef}>
         {PAGE_MAP[displayPage]}
       </main>
+      {isIntelligenceOpen && (
+        <IntelligenceModal mock={mock} onClose={() => setIsIntelligenceOpen(false)} />
+      )}
     </div>
   );
 }
