@@ -7,7 +7,6 @@ export type SystemPage =
   | 'health'
   | 'inspection'
   | 'warnings'
-  | 'model'
   | 'settings';
 
 interface RouterCtx {
@@ -19,7 +18,7 @@ const RouterContext = createContext<RouterCtx>({ page: 'overview', navigate: () 
 
 const ALL_PAGES: SystemPage[] = [
   'overview', 'monitoring', 'prediction', 'health',
-  'inspection', 'warnings', 'model', 'settings',
+  'inspection', 'warnings', 'settings',
 ];
 
 function parsePage(raw: string): SystemPage {

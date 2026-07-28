@@ -58,10 +58,16 @@ def collect_maintenance_facts(db: Session, *, limit: int = 20) -> ToolResult:
         summary = maintenance.fetch_dashboard_summary(db)
         warnings = maintenance.fetch_warnings(db, limit=limit)
         predictions = maintenance.fetch_predictions(db, limit=limit)
+        recent_warnings = _compact_warnings(warnings)
+        recent_predictions = _compact_predictions(predictions)
         data = {
             "summary": summary,
-            "recent_warnings": _compact_warnings(warnings),
-            "recent_predictions": _compact_predictions(predictions),
+            "recent_warnings": recent_warnings,
+            "recent_predictions": recent_predictions,
+            "high_risk_devices": _collect_high_risk_devices(
+                warnings=recent_warnings,
+                predictions=recent_predictions,
+            ),
         }
         return ToolResult(name="maintenance.repository", ok=True, data=data)
     except Exception as exc:  # noqa: BLE001
@@ -115,6 +121,36 @@ def gather_operational_facts(db: Session) -> dict[str, Any]:
         if item.ok:
             facts[item.name] = item.data
     return facts
+
+
+def _collect_high_risk_devices(
+    *,
+    warnings: list[dict[str, Any]],
+    predictions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rank = {"critical": 2, "high": 1}
+    collected: dict[str, dict[str, Any]] = {}
+    for source, rows in (("warning", warnings), ("prediction", predictions)):
+        for row in rows:
+            device_code = str(row.get("device_code") or "").strip()
+            risk_level = str(row.get("risk_level") or "").lower()
+            if not device_code or risk_level not in rank:
+                continue
+            current = collected.get(device_code)
+            if current is None or rank[risk_level] > rank[str(current["risk_level"])]:
+                collected[device_code] = {
+                    "device_code": device_code,
+                    "risk_level": risk_level,
+                    "source": source,
+                    "title": row.get("title"),
+                    "health_score": row.get("health_score"),
+                    "failure_probability": row.get("failure_probability"),
+                    "created_at": row.get("created_at"),
+                }
+    return sorted(
+        collected.values(),
+        key=lambda item: (-rank[str(item["risk_level"])], str(item["device_code"])),
+    )[:20]
 
 
 def _compact_warnings(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

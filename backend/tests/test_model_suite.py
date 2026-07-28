@@ -1,3 +1,4 @@
+import warnings
 from datetime import datetime, timezone
 
 import pytest
@@ -93,3 +94,33 @@ def test_ai4i_model_suite_outputs_probability_anomaly_rul_and_explanations() -> 
         "lightgbm-rul-regressor",
         "shap-risk-explainer",
     }
+
+
+def test_prediction_and_explanation_do_not_emit_model_compatibility_warnings() -> None:
+    rows = [
+        _row(1, "M10001", "M", 298.1, 308.6, 1551, 42.8, 0, 0),
+        _row(2, "M10002", "M", 298.2, 308.7, 1408, 46.3, 3, 0),
+        _row(3, "M10003", "M", 298.1, 308.5, 1498, 49.4, 5, 0),
+        _row(4, "M10004", "M", 298.2, 308.6, 1433, 39.5, 7, 0),
+        _row(5, "M10005", "M", 298.2, 308.7, 1408, 40.0, 9, 0),
+        _row(6, "M10006", "M", 298.1, 308.6, 1425, 41.9, 11, 0),
+        _row(7, "H20001", "H", 303.8, 313.9, 1168, 68.5, 230, 1),
+        _row(8, "H20002", "H", 304.1, 314.2, 1182, 72.4, 236, 1),
+        _row(9, "H20003", "H", 302.6, 312.4, 1281, 62.8, 205, 1),
+        _row(10, "H20004", "H", 302.1, 311.9, 1302, 59.6, 198, 1),
+    ]
+    suite = train_ai4i_model_suite(rows)
+    sample = transform_ai4i_row(rows[-1])
+    window = build_feature_window(standardize_readings(sample.readings))
+
+    assert window is not None
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        predict_with_model_suite(window, suite)
+        explain_prediction(window, suite)
+
+    messages = [str(item.message) for item in captured]
+    assert not any("does not have valid feature names" in message for message in messages)
+    assert not any(
+        "TreeExplainer shap values output has changed" in message for message in messages
+    )

@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.core.config import Settings
 from app.intelligence import agent as intelligence_agent
 from app.intelligence import rag as intelligence_rag
+from app.intelligence import tools as intelligence_tools
 from app.intelligence.inspection import InspectionScheduler
 from app.intelligence.provider import OpenAICompatibleProvider, get_llm_provider_status
 from app.intelligence.rag import tokenize
@@ -69,6 +70,38 @@ def test_chat_in_accepts_session_id() -> None:
     assert payload.session_key == "k1"
     payload2 = ChatIn.model_validate({"message": "hi", "session_id": "99"})
     assert payload2.session_id == 99
+
+
+def test_persistent_prediction_and_warning_facts_include_high_risk_devices(monkeypatch) -> None:
+    monkeypatch.setattr(
+        intelligence_tools.maintenance,
+        "fetch_dashboard_summary",
+        lambda _db: {"high_risk_device_total": 1},
+    )
+    monkeypatch.setattr(
+        intelligence_tools.maintenance,
+        "fetch_warnings",
+        lambda _db, limit=20: [{"device_code": "CNC-01", "risk_level": "critical", "title": "轴温异常"}],
+    )
+    monkeypatch.setattr(
+        intelligence_tools.maintenance,
+        "fetch_predictions",
+        lambda _db, limit=20: [{"device_code": "CNC-01", "risk_level": "high", "health_score": 42}],
+    )
+
+    result = intelligence_tools.collect_maintenance_facts(db=None)  # type: ignore[arg-type]
+    assert result.ok is True
+    assert result.data["high_risk_devices"] == [
+        {
+            "device_code": "CNC-01",
+            "risk_level": "critical",
+            "source": "warning",
+            "title": "轴温异常",
+            "health_score": None,
+            "failure_probability": None,
+            "created_at": "",
+        }
+    ]
 
 
 def test_query_returns_facts_without_llm(monkeypatch) -> None:

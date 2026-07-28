@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+from app.core.config import settings
 from app.core.database import SessionLocal
 from app.features.schemas import WindowFeatureEvent
 from app.inference.schemas import AsyncInferenceOutput
@@ -27,7 +28,11 @@ from app.tsdb.telemetry_repository import (
 logger = logging.getLogger(__name__)
 
 
-def run_async_inference(feature_event: WindowFeatureEvent) -> AsyncInferenceOutput:
+def run_async_inference(
+    feature_event: WindowFeatureEvent,
+    *,
+    forced_failure: bool = False,
+) -> AsyncInferenceOutput:
     db = SessionLocal()
     try:
         ensure_prediction_model_schema(db)
@@ -60,6 +65,11 @@ def run_async_inference(feature_event: WindowFeatureEvent) -> AsyncInferenceOutp
         _mirror_feature_window_to_tsdb(feature_event)
 
         result = predict_with_model_suite(window, model_suite)
+        if forced_failure:
+            result.failure_probability = max(result.failure_probability, 0.85)
+            result.health_score = min(result.health_score, 35)
+            result.risk_level = "critical"
+            result.rul_hours = min(result.rul_hours or 24, 24)
         prediction_id = insert_prediction(
             db,
             device_code=result.device_id,
@@ -137,7 +147,13 @@ def run_async_inference(feature_event: WindowFeatureEvent) -> AsyncInferenceOutp
         db.close()
 
 
+def _tsdb_mirroring_enabled() -> bool:
+    return bool(settings.tsdb_url.strip())
+
+
 def _mirror_feature_window_to_tsdb(feature_event: WindowFeatureEvent) -> None:
+    if not _tsdb_mirroring_enabled():
+        return
     try:
         insert_feature_window_event(
             event_id=feature_event.event_id,
@@ -159,6 +175,8 @@ def _mirror_prediction_metric_to_tsdb(
     result: PredictionResult,
     created_at,
 ) -> None:
+    if not _tsdb_mirroring_enabled():
+        return
     try:
         insert_prediction_metric(
             prediction_id=prediction_id,
@@ -179,6 +197,8 @@ def _mirror_device_status_to_tsdb(
     reason: str,
     source: str,
 ) -> None:
+    if not _tsdb_mirroring_enabled():
+        return
     try:
         insert_device_status_event(
             device_code=device_code,

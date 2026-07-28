@@ -12,6 +12,7 @@ from app.edge.simulation import IndustrialDeviceSimulator
 from app.ingestion.http_schemas import TelemetryPayloadIn
 from app.ingestion.local_adapter import accept_payload_locally
 from app.ingestion.mqtt_simulator import publish_payload_to_mqtt
+from app.inference.local_gateway import local_inference_gateway
 from app.realtime.device_snapshot import clear_local_device_snapshots
 from app.repositories.maintenance_repository import upsert_device, upsert_sensor_point
 from app.training_data.archive import default_archive_observer
@@ -30,6 +31,18 @@ POINTS: dict[str, dict[str, object]] = {
 }
 
 ArchiveObserver = Callable[..., None]
+
+
+def _publish_payload_locally(
+    payload: TelemetryPayloadIn,
+    *,
+    gateway_id: str,
+) -> dict[str, object]:
+    return accept_payload_locally(
+        payload,
+        gateway_id=gateway_id,
+        inference_runner=local_inference_gateway.infer,
+    )
 
 
 @dataclass(frozen=True)
@@ -70,9 +83,10 @@ class DeviceStreamSimulator:
         archive_observer: ArchiveObserver | None = default_archive_observer,
     ) -> None:
         self._publishers = publishers or {
-            "local": accept_payload_locally,
+            "local": _publish_payload_locally,
             "mqtt": publish_payload_to_mqtt,
         }
+        self._uses_direct_local_inference = publishers is None
         self._provisioner = provisioner or provision_devices
         self._scenario_rng = scenario_rng or random.SystemRandom()
         # None disables archiving; default keeps daily AI4I archive on.
@@ -86,6 +100,10 @@ class DeviceStreamSimulator:
     def start(self, config: DeviceStreamConfig) -> DeviceStreamRuntime:
         if config.transport not in self._publishers:
             raise ValueError(f"不支持的设备流链路：{config.transport}")
+        if config.transport == "local" and self._uses_direct_local_inference:
+            from app.services.simulation_runtime import ensure_simulation_model
+
+            ensure_simulation_model()
         self.stop()
         clear_local_device_snapshots(authoritative=config.transport == "local")
         device_codes = [f"{config.device_prefix}-{index + 1:03d}" for index in range(config.device_count)]

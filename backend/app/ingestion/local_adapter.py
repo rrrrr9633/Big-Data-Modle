@@ -1,17 +1,20 @@
-from __future__ import annotations
-
+from collections.abc import Callable
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 from app.ingestion.http_schemas import TelemetryPayloadIn, parse_telemetry_payload
 from app.ingestion.schemas import TelemetryEvent
 from app.realtime.device_snapshot import update_local_device_snapshot
 
+LocalInferenceRunner = Callable[[TelemetryPayloadIn], dict[str, Any]]
+
 
 def accept_payload_locally(
     raw: str | bytes | dict[str, object] | TelemetryPayloadIn,
     *,
     gateway_id: str = "local-simulator",
+    inference_runner: LocalInferenceRunner | None = None,
 ) -> dict[str, object]:
     payload = raw if isinstance(raw, TelemetryPayloadIn) else parse_telemetry_payload(raw)
     recorded_at = payload.recorded_at or datetime.now(timezone.utc)
@@ -33,10 +36,15 @@ def accept_payload_locally(
     for event in events:
         update_local_device_snapshot(event)
 
+    inference = inference_runner(payload) if inference_runner is not None else {}
+    next_stages = ["in_process_snapshot"]
+    if inference_runner is not None:
+        next_stages.append("in_process_inference")
     return {
         "status": "accepted",
         "mode": "local_memory_ingestion",
         "device_code": payload.device_code,
         "accepted_events": len(events),
-        "next_stages": ["in_process_snapshot"],
+        "next_stages": next_stages,
+        **inference,
     }

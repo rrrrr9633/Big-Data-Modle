@@ -363,7 +363,9 @@ def _facts_summary(facts: dict[str, Any]) -> str:
     simulation = facts.get("simulation.runtime") or {}
     model = facts.get("model.registry") or {}
     summary = maintenance.get("summary") if isinstance(maintenance, dict) else {}
-    high_risk = realtime.get("high_risk_devices") if isinstance(realtime, dict) else []
+    snapshot_high_risk = realtime.get("high_risk_devices") if isinstance(realtime, dict) else []
+    persisted_high_risk = maintenance.get("high_risk_devices") if isinstance(maintenance, dict) else []
+    high_risk = _merge_high_risk_devices(snapshot_high_risk, persisted_high_risk)
     lines = [
         "【实时运营事实】",
         f"- 设备总数: {realtime.get('device_total', 0)}，在线: {realtime.get('online_total', 0)}",
@@ -374,16 +376,37 @@ def _facts_summary(facts: dict[str, Any]) -> str:
         f"devices={simulation.get('device_count')}",
         f"- 模型: available={model.get('available')}",
     ]
-    if isinstance(high_risk, list) and high_risk:
-        codes = ", ".join(
-            str(item.get("device_code"))
+    if high_risk:
+        devices = "；".join(
+            f"{item.get('device_code')}（{item.get('risk_level')}，{item.get('source', 'realtime')}）"
             for item in high_risk[:8]
-            if isinstance(item, dict)
         )
-        lines.append(f"- 高风险设备: {codes}")
+        lines.append(f"- 高风险设备: {devices}")
     else:
         lines.append("- 高风险设备: 无")
     return "\n".join(lines)
+
+
+def _merge_high_risk_devices(*groups: object) -> list[dict[str, Any]]:
+    rank = {"critical": 2, "high": 1}
+    merged: dict[str, dict[str, Any]] = {}
+    for group in groups:
+        if not isinstance(group, list):
+            continue
+        for item in group:
+            if not isinstance(item, dict):
+                continue
+            device_code = str(item.get("device_code") or "").strip()
+            risk_level = str(item.get("risk_level") or "").lower()
+            if not device_code or risk_level not in rank:
+                continue
+            current = merged.get(device_code)
+            if current is None or rank[risk_level] > rank[str(current["risk_level"])]:
+                merged[device_code] = item
+    return sorted(
+        merged.values(),
+        key=lambda item: (-rank[str(item["risk_level"]).lower()], str(item["device_code"])),
+    )
 
 
 def _default_title(message: str) -> str:

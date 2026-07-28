@@ -1,5 +1,5 @@
 import {
-  ChartBarHorizontal, ChartLine, Cpu, Gear, Heartbeat,
+  ChartLine, Cpu, Gear, Heartbeat,
   Lightning, Robot, ShieldWarning, SquaresFour, Wrench, ArrowLeft,
 } from '@phosphor-icons/react';
 import { useRouter, type SystemPage } from '../router';
@@ -18,7 +18,6 @@ const NAV: Array<{ page: SystemPage; label: string; icon: typeof SquaresFour; gr
   { page: 'health',     label: '健康评估',   icon: Cpu,                 group: '分析决策' },
   { page: 'inspection', label: '智能巡检',   icon: Wrench,              group: '维护管理' },
   { page: 'warnings',   label: '预警处置',   icon: ShieldWarning,       group: '维护管理' },
-  { page: 'model',      label: '模型训练',   icon: ChartBarHorizontal,  group: '系统管理' },
   { page: 'settings',   label: '系统设置',   icon: Gear,                group: '系统管理' },
 ];
 

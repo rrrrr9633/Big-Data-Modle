@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     cleaned_telemetry_consumer_enabled: bool = False
     feature_consumer_enabled: bool = False
     inference_consumer_enabled: bool = False
+    local_inference_enabled: bool = True
+    local_inference_interval_seconds: float = 10.0
     warning_suppression_seconds: int = 60
     simulation_auto_start: bool = False
     simulation_control_api_enabled: bool = True

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+import pandas as pd
 import shap
 from app.models.health_score import calculate_health_score, risk_level_from_score
 from app.schemas.timeseries import PredictionResult, TimeSeriesWindow
@@ -142,7 +144,7 @@ def explain_ai4i_feature_row(
 ) -> list[RiskExplanation]:
     feature_vector = [feature_values[column] for column in AI4I_FEATURE_COLUMNS]
     shap_values = _positive_class_shap_values(
-        shap.TreeExplainer(suite.classifier).shap_values(np.array([feature_vector]))
+        _tree_shap_values(suite.classifier, _model_input_frame(feature_vector))
     )
     values = shap_values[0] if shap_values.ndim == 2 else shap_values
     explanations = [
@@ -191,7 +193,7 @@ def predict_with_model_suite(window: TimeSeriesWindow, suite: Ai4iModelSuite) ->
 def explain_prediction(window: TimeSeriesWindow, suite: Ai4iModelSuite) -> list[RiskExplanation]:
     feature_vector = _window_vector(window)
     shap_values = _positive_class_shap_values(
-        shap.TreeExplainer(suite.classifier).shap_values(np.array([feature_vector]))
+        _tree_shap_values(suite.classifier, _model_input_frame(feature_vector))
     )
     values = shap_values[0] if shap_values.ndim == 2 else shap_values
     explanations = [
@@ -322,7 +324,7 @@ def _window_vector(window: TimeSeriesWindow) -> list[float]:
 
 
 def _predict_failure_probability(feature_vector: list[float], model: LGBMClassifier) -> float:
-    probability = float(model.predict_proba(np.array([feature_vector]))[0, 1])
+    probability = float(model.predict_proba(_model_input_frame(feature_vector))[0, 1])
     return _clip01(probability)
 
 
@@ -335,7 +337,7 @@ def _predict_anomaly(
 
 
 def _predict_rul(feature_vector: list[float], model: LGBMRegressor) -> float:
-    return round(max(1.0, float(model.predict(np.array([feature_vector]))[0])), 2)
+    return round(max(1.0, float(model.predict(_model_input_frame(feature_vector))[0])), 2)
 
 
 def _rul_target_from_rows(rows: list[dict[str, str]], failures: np.ndarray) -> np.ndarray:
@@ -350,7 +352,7 @@ def _explain_global_importance(
     model: LGBMClassifier,
     x: np.ndarray,
 ) -> list[RiskExplanation]:
-    shap_values = _positive_class_shap_values(shap.TreeExplainer(model).shap_values(x))
+    shap_values = _positive_class_shap_values(_tree_shap_values(model, _model_input_frame(x)))
     if shap_values.ndim == 1:
         mean_abs_values = np.abs(shap_values)
     else:
@@ -383,6 +385,24 @@ def _explanation_metrics(explanations: list[RiskExplanation]) -> list[ModelMetri
             )
         )
     return metrics
+
+
+def _model_input_frame(feature_rows: np.ndarray | list[float]) -> pd.DataFrame:
+    rows = np.asarray(feature_rows, dtype=float)
+    matrix = rows.reshape(1, -1) if rows.ndim == 1 else rows
+    return pd.DataFrame(matrix, columns=AI4I_FEATURE_COLUMNS)
+
+
+def _tree_shap_values(model: LGBMClassifier, values: pd.DataFrame) -> Any:
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=(
+                "LightGBM binary classifier with TreeExplainer shap values output has changed.*"
+            ),
+            category=UserWarning,
+        )
+        return shap.TreeExplainer(model).shap_values(values)
 
 
 def _positive_class_shap_values(shap_values: Any) -> np.ndarray:
